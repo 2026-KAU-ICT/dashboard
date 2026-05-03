@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" role="img" aria-label="Construction site aerial map">
+  <defs>
+    <linearGradient id="ground" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1f2933"/>
+      <stop offset="0.48" stop-color="#2c3340"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="slab" x1="0" x2="1">
+      <stop offset="0" stop-color="#536171"/>
+      <stop offset="1" stop-color="#2f3946"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#030712" flood-opacity="0.5"/>
+    </filter>
+    <pattern id="rebar" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <path d="M0 14H28" stroke="#8191a3" stroke-width="3" stroke-opacity="0.28"/>
+    </pattern>
+    <pattern id="deck" width="38" height="38" patternUnits="userSpaceOnUse">
+      <path d="M0 0H38V38H0Z" fill="#34404d"/>
+      <path d="M0 19H38M19 0V38" stroke="#9aa6b2" stroke-width="1" stroke-opacity="0.16"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="760" fill="url(#ground)"/>
+  <path d="M0 94C170 44 334 60 484 98C657 142 771 86 924 48C1038 20 1139 25 1200 43V760H0Z" fill="#26323e"/>
+  <path d="M-25 595C132 511 270 500 435 535C576 565 694 654 838 650C983 646 1068 552 1224 524V760H-25Z" fill="#17202b"/>
+  <g opacity="0.34">
+    <path d="M62 106L1131 642" stroke="#9aa6b2" stroke-width="12" stroke-linecap="round"/>
+    <path d="M97 72L1166 608" stroke="#030712" stroke-width="2" stroke-opacity="0.7"/>
+    <path d="M31 142L1100 678" stroke="#030712" stroke-width="2" stroke-opacity="0.7"/>
+  </g>
+  <g filter="url(#shadow)" transform="rotate(-9 620 385)">
+    <rect x="216" y="125" width="745" height="476" rx="18" fill="url(#slab)"/>
+    <rect x="252" y="163" width="675" height="400" rx="9" fill="url(#deck)" opacity="0.95"/>
+    <rect x="252" y="163" width="675" height="400" rx="9" fill="url(#rebar)" opacity="0.52"/>
+    <rect x="308" y="218" width="205" height="126" rx="6" fill="#202a35" stroke="#98a6b3" stroke-opacity="0.25"/>
+    <rect x="543" y="224" width="306" height="92" rx="6" fill="#465466" stroke="#cbd5e1" stroke-opacity="0.2"/>
+    <rect x="542" y="346" width="256" height="164" rx="6" fill="#222c37" stroke="#98a6b3" stroke-opacity="0.25"/>
+    <path d="M255 382H925" stroke="#f59e0b" stroke-width="5" stroke-dasharray="20 18" opacity="0.78"/>
+    <path d="M526 164V562" stroke="#22d3ee" stroke-width="5" stroke-dasharray="14 14" opacity="0.45"/>
+    <path d="M820 163V562" stroke="#ef4444" stroke-width="5" stroke-dasharray="16 18" opacity="0.5"/>
+  </g>
+  <g opacity="0.78">
+    <rect x="49" y="526" width="132" height="76" rx="8" fill="#2f3a46"/>
+    <rect x="83" y="481" width="62" height="121" rx="4" fill="#475569"/>
+    <path d="M86 481L244 405" stroke="#facc15" stroke-width="10" stroke-linecap="round"/>
+    <path d="M86 481L211 364" stroke="#facc15" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="86" cy="481" r="18" fill="#f59e0b"/>
+  </g>
+  <g opacity="0.62">
+    <rect x="986" y="119" width="152" height="86" rx="7" fill="#384453"/>
+    <rect x="1009" y="90" width="102" height="42" rx="5" fill="#596679"/>
+    <rect x="1008" y="221" width="96" height="162" rx="8" fill="#26313d"/>
+    <path d="M962 425H1161" stroke="#64748b" stroke-width="13" stroke-linecap="round" stroke-dasharray="34 18"/>
+  </g>
+  <g opacity="0.28">
+    <circle cx="172" cy="227" r="86" fill="none" stroke="#38bdf8" stroke-width="2"/>
+    <circle cx="1001" cy="552" r="110" fill="none" stroke="#34d399" stroke-width="2"/>
+    <circle cx="612" cy="636" r="92" fill="none" stroke="#f97316" stroke-width="2"/>
+  </g>
+</svg>
