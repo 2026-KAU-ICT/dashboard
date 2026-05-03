@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## A-Hook Integrated Control System
 
 React 기반 건설 현장 실시간 안전 관제 대시보드입니다.
@@ -26,3 +27,7 @@ VITE_GATEWAY_WS_URL=ws://게이트웨이주소
 ```
 
 설정하지 않으면 Mock Gateway 이벤트로 대시보드를 시뮬레이션합니다.
+=======
+# dashboard
+날아라 ICT보드 팀 웹 대시보드입니다.
+>>>>>>> bbf71d2304a711071cfb39bbbe8ceb5f74cf7181
