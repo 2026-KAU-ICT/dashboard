@@ -13,6 +13,8 @@ export function ControlPanel({
   onResetCartridge,
   onZoneChange,
   onApplyZone,
+  onBeginZoneEdit,
+  editingZoneFloors,
 }: {
   selectedWorker?: Worker;
   zoneSettings: Record<FloorId, ZoneSetting>;
@@ -22,6 +24,8 @@ export function ControlPanel({
   onResetCartridge: () => void;
   onZoneChange: (floor: FloorId, key: 'threshold' | 'dangerRadius', value: number) => void;
   onApplyZone: (floor: FloorId) => void;
+  onBeginZoneEdit: (floor: FloorId) => void;
+  editingZoneFloors: FloorId[];
 }) {
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
 
@@ -127,6 +131,7 @@ export function ControlPanel({
 
           {(Object.keys(zoneSettings) as FloorId[]).map((floor) => {
             const setting = zoneSettings[floor];
+            const isEditing = editingZoneFloors.includes(floor);
             return (
               <div key={floor} className="border border-white/10 bg-black/20 p-3">
                 <div className="flex items-center justify-between">
@@ -138,36 +143,57 @@ export function ControlPanel({
                   </div>
                   <button
                     type="button"
-                    className="border border-emerald-300/30 px-2 py-1 text-xs font-bold text-emerald-100 transition hover:bg-emerald-300/10"
-                    onClick={() => onApplyZone(floor)}
+                    className={`border px-2 py-1 text-xs font-bold transition ${
+                      isEditing
+                        ? 'border-emerald-300/50 bg-emerald-300 text-emerald-950 hover:bg-emerald-200'
+                        : 'border-white/15 text-stone-200 hover:bg-white/10'
+                    }`}
+                    onClick={() => {
+                      if (isEditing) {
+                        onApplyZone(floor);
+                        return;
+                      }
+
+                      onBeginZoneEdit(floor);
+                    }}
                   >
-                    적용
+                    {isEditing ? '적용' : '변경'}
                   </button>
                 </div>
 
-                <label className="mt-3 block text-xs font-semibold text-stone-400">
+                <label className={`mt-3 block text-xs font-semibold ${isEditing ? 'text-stone-300' : 'text-stone-500'}`}>
                   RSSI 임계값
                   <span className="float-right text-stone-200">{setting.threshold} dBm</span>
                   <input
-                    className="range-control mt-2 w-full"
+                    className="range-control mt-2 w-full disabled:cursor-not-allowed disabled:opacity-35"
                     type="range"
                     min="-90"
                     max="-45"
+                    disabled={!isEditing}
                     value={setting.threshold}
-                    onChange={(event) => onZoneChange(floor, 'threshold', Number(event.target.value))}
+                    onChange={(event) => {
+                      if (isEditing) {
+                        onZoneChange(floor, 'threshold', Number(event.target.value));
+                      }
+                    }}
                   />
                 </label>
 
-                <label className="mt-3 block text-xs font-semibold text-stone-400">
+                <label className={`mt-3 block text-xs font-semibold ${isEditing ? 'text-stone-300' : 'text-stone-500'}`}>
                   위험 반경
                   <span className="float-right text-stone-200">{setting.dangerRadius} m</span>
                   <input
-                    className="range-control mt-2 w-full"
+                    className="range-control mt-2 w-full disabled:cursor-not-allowed disabled:opacity-35"
                     type="range"
                     min="3"
                     max="18"
+                    disabled={!isEditing}
                     value={setting.dangerRadius}
-                    onChange={(event) => onZoneChange(floor, 'dangerRadius', Number(event.target.value))}
+                    onChange={(event) => {
+                      if (isEditing) {
+                        onZoneChange(floor, 'dangerRadius', Number(event.target.value));
+                      }
+                    }}
                   />
                 </label>
               </div>

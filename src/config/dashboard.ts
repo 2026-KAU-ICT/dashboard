@@ -188,42 +188,42 @@ export const gatewayNodes: GatewayNode[] = [
 export const mapZones: MapZone[] = [
   {
     floor: '3F',
-    left: 9,
-    top: 22,
-    width: 29,
-    height: 53,
+    left: 14,
+    top: 12,
+    width: 30,
+    height: 56,
     color: 'rgba(52, 211, 153, 0.1)',
     border: 'rgba(52, 211, 153, 0.72)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 42,
-    metersHeight: 31,
+    metersWidth: 46,
+    metersHeight: 34,
   },
   {
     floor: '4F',
     left: 38,
-    top: 18,
+    top: 12,
     width: 31,
     height: 56,
     color: 'rgba(56, 189, 248, 0.1)',
     border: 'rgba(56, 189, 248, 0.72)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 39,
-    metersHeight: 29,
+    metersWidth: 48,
+    metersHeight: 34,
   },
   {
     floor: 'ROOF',
-    left: 68,
-    top: 14,
-    width: 23,
-    height: 58,
+    left: 64,
+    top: 12,
+    width: 25,
+    height: 56,
     color: 'rgba(245, 158, 11, 0.11)',
     border: 'rgba(245, 158, 11, 0.74)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 32,
-    metersHeight: 27,
+    metersWidth: 40,
+    metersHeight: 34,
   },
 ];
 
@@ -260,7 +260,7 @@ export const statusMeta: Record<
   },
 };
 
-export const aerialImagePixels = { width: 1200, height: 760 };
+export const aerialImagePixels = { width: 1901, height: 911 };
 export const gatewayUrls = String(
   import.meta.env.VITE_GATEWAY_WS_URLS ?? import.meta.env.VITE_GATEWAY_WS_URL ?? '',
 )

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type PointerEvent } from 'react';
 import { MapPinned, RadioTower, UserRound } from 'lucide-react';
-import aerialSite from '../assets/aerial-site.svg';
+import campusMap from '../assets/kau-campus.png';
 import { floorLabels, mapZones, statusMeta } from '../config/dashboard';
 import { clamp } from '../lib/base';
 import {
@@ -19,6 +19,7 @@ export function SiteMap({
   selectedFloor,
   selectedWorkerId,
   zoneSettings,
+  editableZoneFloors,
   onZoneCenterChange,
   onFloorChange,
   onSelectWorker,
@@ -27,6 +28,7 @@ export function SiteMap({
   selectedFloor: FloorFilter;
   selectedWorkerId?: string;
   zoneSettings: Record<FloorId, ZoneSetting>;
+  editableZoneFloors: FloorId[];
   onZoneCenterChange: (floor: FloorId, center: Coordinate) => void;
   onFloorChange: (floor: FloorFilter) => void;
   onSelectWorker: (workerId: string) => void;
@@ -51,7 +53,7 @@ export function SiteMap({
       : '';
 
   const updateDraggedZone = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragFloor || !mapRef.current) {
+    if (!dragFloor || !mapRef.current || !editableZoneFloors.includes(dragFloor)) {
       return;
     }
 
@@ -91,14 +93,14 @@ export function SiteMap({
       <div className="p-3 sm:p-4">
         <div
           ref={mapRef}
-          className="map-grid relative aspect-[16/10] min-h-[330px] overflow-hidden border border-white/10 bg-[#0f1412] sm:min-h-[420px] lg:min-h-[460px]"
+          className="map-grid relative aspect-[1901/911] min-h-[260px] overflow-hidden border border-white/10 bg-[#0f1412] sm:min-h-[360px] lg:min-h-[460px]"
           onPointerMove={updateDraggedZone}
           onPointerUp={() => setDragFloor(null)}
           onPointerLeave={() => setDragFloor(null)}
         >
           <img
-            src={aerialSite}
-            alt="건설 현장 항공뷰"
+            src={campusMap}
+            alt="한국항공대학교 강의동 항공뷰"
             className="absolute inset-0 h-full w-full object-cover opacity-90"
             draggable={false}
           />
@@ -108,6 +110,7 @@ export function SiteMap({
           {mapZones.map((zone) => {
             const dimmed = selectedFloor !== 'ALL' && selectedFloor !== zone.floor;
             const setting = zoneSettings[zone.floor];
+            const isZoneEditable = editableZoneFloors.includes(zone.floor);
             const dangerWidth = clamp((setting.dangerRadius * 2 / zone.metersWidth) * 100, 16, 48);
             const dangerHeight = clamp((setting.dangerRadius * 2 / zone.metersHeight) * 100, 16, 48);
             return (
@@ -128,7 +131,9 @@ export function SiteMap({
                   {floorLabels[zone.floor]} Gateway
                 </div>
                 <div
-                  className="absolute rounded-full border border-amber-200/75 bg-amber-300/10 touch-none cursor-grab active:cursor-grabbing"
+                  className={`absolute rounded-full border border-amber-200/75 bg-amber-300/10 touch-none ${
+                    isZoneEditable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-70'
+                  }`}
                   style={{
                     left: `${(setting.center.x / zone.sourceWidth) * 100}%`,
                     top: `${(setting.center.y / zone.sourceHeight) * 100}%`,
@@ -138,7 +143,9 @@ export function SiteMap({
                   }}
                   onPointerDown={(event) => {
                     event.stopPropagation();
-                    setDragFloor(zone.floor);
+                    if (isZoneEditable) {
+                      setDragFloor(zone.floor);
+                    }
                   }}
                 >
                   <span className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100 sm:block">

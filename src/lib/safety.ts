@@ -95,6 +95,14 @@ const readValue = (source: GatewayRawPayload, keys: string[]) => {
     if (value !== undefined && value !== null && value !== '') {
       return value;
     }
+
+    const matchedKey = Object.keys(source).find((sourceKey) => sourceKey.toLowerCase() === key.toLowerCase());
+    if (matchedKey) {
+      const matchedValue = source[matchedKey];
+      if (matchedValue !== undefined && matchedValue !== null && matchedValue !== '') {
+        return matchedValue;
+      }
+    }
   }
   return undefined;
 };
@@ -158,6 +166,28 @@ const normalizeStatus = (raw: GatewayRawPayload, isHooked: boolean): WorkerStatu
   return 'NORMAL';
 };
 
+const normalizeTimestamp = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const milliseconds = value < 10_000_000_000 ? value * 1000 : value;
+    return new Date(milliseconds).toISOString();
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && /^\d+(\.\d+)?$/.test(value.trim())) {
+      const milliseconds = numericValue < 10_000_000_000 ? numericValue * 1000 : numericValue;
+      return new Date(milliseconds).toISOString();
+    }
+
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+};
+
 const normalizeAirbagState = (value: unknown, status: WorkerStatus): AirbagState | undefined => {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (['DEPLOYED', 'USED', 'OPEN', '전개'].includes(normalized) || status === 'EMERGENCY') {
@@ -202,7 +232,9 @@ const normalizeLedMode = (value: unknown): LedMode | undefined => {
 
 const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Partial<WorkerTelemetry> => {
   const telemetry = readRecord(raw, 'telemetry') ?? raw;
-  const airbagDeployed = readBoolean(raw, ['airbag_deployed', 'airbagDeployed']);
+  const airbagDeployed =
+    readBoolean(raw, ['airbag_deployed', 'airbagDeployed']) ??
+    readBoolean(telemetry, ['airbag_deployed', 'airbagDeployed']);
   const airbagState = normalizeAirbagState(
     readValue(telemetry, ['airbagState', 'airbag_state', 'airbag']),
     airbagDeployed ? 'EMERGENCY' : status,
@@ -232,8 +264,8 @@ const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Parti
 const normalizeCoords = (raw: GatewayRawPayload): Coordinate => {
   const coords = readRecord(raw, 'coords') ?? readRecord(raw, 'coord') ?? readRecord(raw, 'position') ?? raw;
   return {
-    x: readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x']) ?? 100,
-    y: readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y']) ?? 70,
+    x: readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x', 'coords.x']) ?? 100,
+    y: readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y', 'coords.y']) ?? 70,
   };
 };
 
@@ -259,14 +291,15 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
     status,
     is_hooked: isHooked,
     coords: normalizeCoords(raw),
-    timestamp: readString(raw, ['timestamp', 'time', 'ts']) ?? new Date().toISOString(),
-    battery: readNumber(raw, ['battery', 'battery_percent', 'battery_pct']),
+    timestamp: normalizeTimestamp(readValue(raw, ['timestamp', 'time', 'ts'])),
+    battery: readNumber(raw, ['battery', 'battery_percent', 'battery_pct', 'batteryPercent', 'batteryLevel', 'bat_pct']),
     telemetry: normalizeTelemetry(raw, status),
   };
 };
 
 export const parseGatewayMessage = (data: unknown): GatewayPayload[] => {
   const root = isRecord(data) && isRecord(data.payload) ? data.payload : data;
+  const envelope = isRecord(root) ? root : undefined;
   const list =
     Array.isArray(root)
       ? root
@@ -274,9 +307,12 @@ export const parseGatewayMessage = (data: unknown): GatewayPayload[] => {
         ? root.workers
         : isRecord(root) && Array.isArray(root.devices)
           ? root.devices
+          : isRecord(root) && root.worker
+            ? [root.worker]
           : [root];
 
   return list
+    .map((item) => (envelope && isRecord(item) ? { ...envelope, ...item } : item))
     .map((item) => normalizeRawGatewayPayload(item))
     .filter((payload): payload is GatewayPayload => Boolean(payload));
 };

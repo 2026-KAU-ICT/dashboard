@@ -10,7 +10,16 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ControlActionDialog,
+  type ControlActionResult,
+} from './components/ControlActionDialog';
 import { ControlPanel } from './components/ControlPanel';
+import {
+  EmergencyActionDialog,
+  type EmergencyActionKind,
+  type EmergencyActionResult,
+} from './components/EmergencyActionDialog';
 import { EmergencyOverlay } from './components/EmergencyOverlay';
 import { Header } from './components/Header';
 import { NotificationPanel } from './components/NotificationPanel';
@@ -56,9 +65,13 @@ function App() {
   const [selectedWorkerId, setSelectedWorkerId] = useState('A001');
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [zoneSettings, setZoneSettings] = useState(defaultZoneSettings);
+  const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
+  const [editingZoneFloors, setEditingZoneFloors] = useState<FloorId[]>([]);
   const [commandFeedback, setCommandFeedback] = useState('대기 중');
-  const [emergencyOpen, setEmergencyOpen] = useState(false);
-  const [lastEmergencyKey, setLastEmergencyKey] = useState('');
+  const [activeEmergency, setActiveEmergency] = useState<Worker | null>(null);
+  const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
+  const [emergencyActionResult, setEmergencyActionResult] = useState<EmergencyActionResult | null>(null);
+  const [controlActionResult, setControlActionResult] = useState<ControlActionResult | null>(null);
   const socketsRef = useRef<WebSocket[]>([]);
   const sirenRef = useRef<{
     context: AudioContext;
@@ -243,11 +256,19 @@ function App() {
     [selectedWorkerId, workers],
   );
 
-  const emergencyWorker = useMemo(() => {
+  const visibleZoneSettings = useMemo(() => {
+    const next = { ...zoneSettings };
+    editingZoneFloors.forEach((floor) => {
+      next[floor] = draftZoneSettings[floor];
+    });
+    return next;
+  }, [draftZoneSettings, editingZoneFloors, zoneSettings]);
+
+  const pendingEmergencyWorker = useMemo(() => {
     return [...workers]
-      .filter((worker) => worker.status === 'EMERGENCY')
+      .filter((worker) => worker.status === 'EMERGENCY' && !acknowledgedEmergencyIds.includes(worker.worker_id))
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-  }, [workers]);
+  }, [acknowledgedEmergencyIds, workers]);
 
   const startSirenSound = useCallback(() => {
     if (sirenRef.current) {
@@ -303,18 +324,28 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!emergencyWorker) {
+    setAcknowledgedEmergencyIds((current) => {
+      const next = current.filter((id) =>
+        workers.some((worker) => worker.worker_id === id && worker.status === 'EMERGENCY'),
+      );
+
+      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [workers]);
+
+  useEffect(() => {
+    if (activeEmergency || !pendingEmergencyWorker) {
       return;
     }
 
-    const emergencyKey = `${emergencyWorker.worker_id}-${emergencyWorker.timestamp}`;
-    if (emergencyKey !== lastEmergencyKey) {
-      setLastEmergencyKey(emergencyKey);
-      setSelectedWorkerId(emergencyWorker.worker_id);
-      setEmergencyOpen(true);
-      startSirenSound();
-    }
-  }, [emergencyWorker, lastEmergencyKey, startSirenSound]);
+    setSelectedWorkerId(pendingEmergencyWorker.worker_id);
+    setActiveEmergency(pendingEmergencyWorker);
+    startSirenSound();
+  }, [activeEmergency, pendingEmergencyWorker, startSirenSound]);
 
   useEffect(() => stopSirenSound, [stopSirenSound]);
 
@@ -420,7 +451,7 @@ function App() {
   };
 
   const updateZoneSetting = (floor: FloorId, key: 'threshold' | 'dangerRadius', value: number) => {
-    setZoneSettings((current) => ({
+    setDraftZoneSettings((current) => ({
       ...current,
       [floor]: {
         ...current[floor],
@@ -429,8 +460,21 @@ function App() {
     }));
   };
 
+  const beginZoneEdit = (floor: FloorId) => {
+    setDraftZoneSettings((current) => ({
+      ...current,
+      [floor]: zoneSettings[floor],
+    }));
+    setEditingZoneFloors((current) => (current.includes(floor) ? current : [...current, floor]));
+  };
+
   const applyZoneSetting = (floor: FloorId) => {
-    const setting = zoneSettings[floor];
+    const setting = draftZoneSettings[floor];
+    setZoneSettings((current) => ({
+      ...current,
+      [floor]: setting,
+    }));
+    setEditingZoneFloors((current) => current.filter((editingFloor) => editingFloor !== floor));
     sendCommand({
       command: 'UPDATE_ZONE',
       floor,
@@ -441,7 +485,7 @@ function App() {
   };
 
   const updateZoneCenter = (floor: FloorId, center: Coordinate) => {
-    setZoneSettings((current) => ({
+    setDraftZoneSettings((current) => ({
       ...current,
       [floor]: {
         ...current[floor],
@@ -467,9 +511,19 @@ function App() {
       return;
     }
 
+    const worker = selectedWorker;
     sendCommand({
       command: 'RESET_AIRBAG_CARTRIDGE',
-      target_id: selectedWorker.worker_id,
+      target_id: worker.worker_id,
+    });
+    setControlActionResult({
+      action: 'CARTRIDGE_RESET',
+      floor: worker.floor,
+      workerId: worker.worker_id,
+      workerName: worker.name,
+      gateway: worker.gateway,
+      affectedCount: 1,
+      timestamp: new Date().toISOString(),
     });
   };
 
@@ -478,6 +532,70 @@ function App() {
       command: 'BROADCAST_EVACUATION',
       floor,
       reason: 'FALL_OR_UNHOOKED_DANGER',
+    });
+    setControlActionResult({
+      action: floor === 'ALL' ? 'SITE_EVACUATION' : 'FLOOR_WARNING',
+      floor,
+      workerId: floor === 'ALL' ? undefined : selectedWorker?.worker_id,
+      workerName: floor === 'ALL' ? undefined : selectedWorker?.name,
+      gateway: floor === 'ALL' ? 'ALL-GATEWAYS' : selectedWorker?.gateway,
+      affectedCount: floor === 'ALL' ? workers.length : workers.filter((worker) => worker.floor === floor).length,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  const handleEmergencyAction = (action: EmergencyActionKind) => {
+    if (!activeEmergency) {
+      return;
+    }
+
+    const worker = activeEmergency;
+    const handledAt = new Date().toISOString();
+    stopSirenSound();
+    setAcknowledgedEmergencyIds((current) =>
+      current.includes(worker.worker_id) ? current : [...current, worker.worker_id],
+    );
+
+    if (action === 'ALARM_RELAY') {
+      sendCommand({
+        command: 'ACTIVATE_ALARM',
+        target_id: worker.worker_id,
+      });
+    }
+
+    if (action === 'BROADCAST_WARNING') {
+      sendCommand({
+        command: 'BROADCAST_EVACUATION',
+        floor: worker.floor,
+        reason: 'EMERGENCY_FALL_DETECTED',
+      });
+    }
+
+    if (action === 'ACK_STOP') {
+      setCommandFeedback('비상 알림 확인 및 관제 사이렌 정지');
+      const acknowledgementEvent: EventLog = {
+        id: `ack-${Date.now()}`,
+        timestamp: handledAt,
+        floor: worker.floor,
+        workerId: worker.worker_id,
+        workerName: worker.name,
+        status: 'CONTROL',
+        message: `${worker.name} 추락 알림 확인 및 관제 사이렌 정지`,
+      };
+      queryClient.setQueryData<EventLog[]>(QUERY_KEYS.events, (current = initialEvents) => [
+        acknowledgementEvent,
+        ...current,
+      ].slice(0, 60));
+    }
+
+    setActiveEmergency(null);
+    setEmergencyActionResult({
+      action,
+      workerId: worker.worker_id,
+      workerName: worker.name,
+      floor: worker.floor,
+      gateway: worker.gateway,
+      timestamp: handledAt,
     });
   };
 
@@ -553,7 +671,8 @@ function App() {
             workers={workers}
             selectedFloor={selectedFloor}
             selectedWorkerId={selectedWorker?.worker_id}
-            zoneSettings={zoneSettings}
+            zoneSettings={visibleZoneSettings}
+            editableZoneFloors={editingZoneFloors}
             onZoneCenterChange={updateZoneCenter}
             onFloorChange={setSelectedFloor}
             onSelectWorker={setSelectedWorkerId}
@@ -562,11 +681,13 @@ function App() {
           <aside className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
             <ControlPanel
               selectedWorker={selectedWorker}
-              zoneSettings={zoneSettings}
+              zoneSettings={visibleZoneSettings}
+              editingZoneFloors={editingZoneFloors}
               onActivateAlarm={activateSelectedAlarm}
               onBroadcastEvacuation={broadcastEvacuation}
               onLedModeChange={setSelectedLedMode}
               onResetCartridge={resetSelectedCartridge}
+              onBeginZoneEdit={beginZoneEdit}
               onApplyZone={applyZoneSetting}
               onZoneChange={updateZoneSetting}
             />
@@ -577,27 +698,19 @@ function App() {
         <OperationalPanels workers={workers} selectedWorker={selectedWorker} />
       </div>
 
-      {emergencyOpen && emergencyWorker && (
+      {activeEmergency && (
         <EmergencyOverlay
-          worker={emergencyWorker}
-          onClose={() => {
-            setEmergencyOpen(false);
-            stopSirenSound();
-          }}
-          onAlarm={() =>
-            sendCommand({
-              command: 'ACTIVATE_ALARM',
-              target_id: emergencyWorker.worker_id,
-            })
-          }
-          onBroadcast={() =>
-            sendCommand({
-              command: 'BROADCAST_EVACUATION',
-              floor: emergencyWorker.floor,
-              reason: 'EMERGENCY_FALL_DETECTED',
-            })
-          }
+          worker={activeEmergency}
+          onAlarm={() => handleEmergencyAction('ALARM_RELAY')}
+          onBroadcast={() => handleEmergencyAction('BROADCAST_WARNING')}
+          onAcknowledge={() => handleEmergencyAction('ACK_STOP')}
         />
+      )}
+      {emergencyActionResult && (
+        <EmergencyActionDialog result={emergencyActionResult} onClose={() => setEmergencyActionResult(null)} />
+      )}
+      {controlActionResult && (
+        <ControlActionDialog result={controlActionResult} onClose={() => setControlActionResult(null)} />
       )}
     </main>
   );
