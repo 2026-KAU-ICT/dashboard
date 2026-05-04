@@ -6,6 +6,7 @@ import { clamp } from '../lib/base';
 import {
   calculateWorkerRisk,
   clusterWorkerPoints,
+  getMapZone,
   mapCoordsToZone,
   mapWorkerToZone,
   viewportToFloorCoords,
@@ -38,6 +39,7 @@ export function SiteMap({
   const selectedWorker = workers.find((worker) => worker.worker_id === selectedWorkerId);
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
+  const selectedZone = selectedWorker ? getMapZone(selectedWorker.floor) : undefined;
   const breadcrumbPath =
     selectedWorker && (selectedFloor === 'ALL' || selectedFloor === selectedWorker.floor)
       ? selectedWorker.trace
@@ -67,15 +69,15 @@ export function SiteMap({
             <MapPinned className="h-5 w-5 text-emerald-300" />
             항공뷰 모니터링
           </div>
-          <p className="mt-1 text-sm text-stone-400">조끼 → BLE → 게이트웨이 → 웹</p>
+          <p className="mt-1 text-sm text-stone-400">조끼 BLE → 가까운 게이트웨이 → WebSocket 웹</p>
         </div>
 
-        <div className="grid grid-cols-4 border border-white/10 bg-black/20 text-sm font-semibold">
+        <div className="grid grid-cols-4 border border-white/10 bg-black/20 text-xs font-semibold sm:text-sm">
           {(['ALL', '3F', '4F', 'ROOF'] as FloorFilter[]).map((floor) => (
             <button
               key={floor}
               type="button"
-              className={`px-3 py-2 transition ${
+              className={`px-2 py-2 transition sm:px-3 ${
                 selectedFloor === floor ? 'bg-emerald-300 text-emerald-950' : 'text-stone-300 hover:bg-white/10'
               }`}
               onClick={() => onFloorChange(floor)}
@@ -89,7 +91,7 @@ export function SiteMap({
       <div className="p-3 sm:p-4">
         <div
           ref={mapRef}
-          className="map-grid relative aspect-[16/10] min-h-[460px] overflow-hidden border border-white/10 bg-[#0f1412]"
+          className="map-grid relative aspect-[16/10] min-h-[330px] overflow-hidden border border-white/10 bg-[#0f1412] sm:min-h-[420px] lg:min-h-[460px]"
           onPointerMove={updateDraggedZone}
           onPointerUp={() => setDragFloor(null)}
           onPointerLeave={() => setDragFloor(null)}
@@ -121,7 +123,7 @@ export function SiteMap({
                   borderColor: zone.border,
                 }}
               >
-                <div className="absolute left-2 top-2 inline-flex items-center gap-2 border border-white/10 bg-black/55 px-2 py-1 text-xs font-black text-stone-100 backdrop-blur">
+                <div className="absolute left-2 top-2 inline-flex items-center gap-1.5 border border-white/10 bg-black/55 px-1.5 py-1 text-[10px] font-black text-stone-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
                   <RadioTower className="h-3.5 w-3.5" />
                   {floorLabels[zone.floor]} Gateway
                 </div>
@@ -139,7 +141,7 @@ export function SiteMap({
                     setDragFloor(zone.floor);
                   }}
                 >
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100">
+                  <span className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100 sm:block">
                     Hook Zone
                   </span>
                 </div>
@@ -172,7 +174,7 @@ export function SiteMap({
                 <button
                   type="button"
                   key={cluster.id}
-                  className={`absolute flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center border-2 text-sm font-black ring-4 transition hover:scale-110 ${
+                  className={`absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center border-2 text-sm font-black ring-4 transition hover:scale-110 sm:h-12 sm:w-12 ${
                     urgent
                       ? 'border-red-200 bg-red-500 text-white ring-red-300/60'
                       : 'border-cyan-100 bg-cyan-300 text-cyan-950 ring-cyan-200/40'
@@ -196,7 +198,7 @@ export function SiteMap({
               <button
                 type="button"
                 key={worker.worker_id}
-                className={`absolute flex h-11 w-11 items-center justify-center border-2 ${meta.border} ${
+                className={`absolute flex h-10 w-10 items-center justify-center border-2 sm:h-11 sm:w-11 ${meta.border} ${
                   worker.status === 'EMERGENCY' ? 'animate-pulseDanger' : '-translate-x-1/2 -translate-y-1/2'
                 } ${meta.marker} ring-4 transition hover:scale-110 ${isSelected ? 'outline outline-2 outline-white' : ''}`}
                 style={{
@@ -208,7 +210,7 @@ export function SiteMap({
               >
                 <UserRound className="h-5 w-5" />
                 <span className="sr-only">{worker.name}</span>
-                <span className="absolute left-1/2 top-full mt-2 min-w-24 -translate-x-1/2 border border-white/10 bg-black/70 px-2 py-1 text-xs font-bold text-stone-50 shadow-panel backdrop-blur">
+                <span className="absolute left-1/2 top-full mt-2 hidden min-w-24 -translate-x-1/2 border border-white/10 bg-black/70 px-2 py-1 text-xs font-bold text-stone-50 shadow-panel backdrop-blur sm:block">
                   {worker.worker_id} · {risk}%
                 </span>
               </button>
@@ -238,7 +240,7 @@ export function SiteMap({
           ) : null}
 
           {selectedMapPoint ? (
-            <div className="absolute right-3 top-3 border border-white/10 bg-black/65 px-3 py-2 text-xs font-semibold text-stone-200 backdrop-blur">
+            <div className="absolute left-3 right-3 top-3 border border-white/10 bg-black/65 px-3 py-2 text-[11px] font-semibold text-stone-200 backdrop-blur sm:left-auto sm:right-3 sm:text-xs">
               {selectedMapPoint.pixelX}px, {selectedMapPoint.pixelY}px · {selectedMapPoint.meterX}m, {selectedMapPoint.meterY}m
             </div>
           ) : null}
@@ -249,8 +251,29 @@ export function SiteMap({
             <LegendItem color="bg-red-500" label="비상" />
           </div>
         </div>
+
+        {selectedWorker && selectedMapPoint && selectedZone ? (
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+            <CalibrationTile label="상대 좌표" value={`${Math.round(selectedWorker.coords.x)}, ${Math.round(selectedWorker.coords.y)}`} />
+            <CalibrationTile label="항공뷰 픽셀" value={`${selectedMapPoint.pixelX}px, ${selectedMapPoint.pixelY}px`} />
+            <CalibrationTile label="현장 거리" value={`${selectedMapPoint.meterX}m, ${selectedMapPoint.meterY}m`} />
+            <CalibrationTile
+              label="RSSI/스케일"
+              value={`${selectedWorker.telemetry.rssiDbm} dBm · ${selectedZone.metersWidth}m x ${selectedZone.metersHeight}m`}
+            />
+          </div>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function CalibrationTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-white/10 bg-black/25 px-3 py-2">
+      <p className="text-[11px] font-semibold text-stone-500">{label}</p>
+      <p className="mt-1 break-keep text-sm font-black text-stone-100">{value}</p>
+    </div>
   );
 }
 

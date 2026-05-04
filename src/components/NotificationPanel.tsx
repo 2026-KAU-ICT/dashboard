@@ -8,7 +8,7 @@ import { StatusBadge } from './ui';
 export function NotificationPanel({ events, workers }: { events: EventLog[]; workers: Worker[] }) {
   return (
     <section className="flex min-h-[420px] flex-col border border-white/10 bg-[#101310] shadow-panel">
-      <div className="flex items-center justify-between border-b border-white/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 p-4">
         <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
           <Bell className="h-5 w-5 text-amber-200" />
           실시간 알림 센터
@@ -30,7 +30,7 @@ export function NotificationPanel({ events, workers }: { events: EventLog[]; wor
 
       <div className="max-h-[520px] flex-1 overflow-y-auto">
         {events.map((event) => (
-          <article key={event.id} className="grid grid-cols-[82px_minmax(0,1fr)] gap-3 border-b border-white/10 px-4 py-3">
+          <article key={event.id} className="grid gap-2 border-b border-white/10 px-4 py-3 sm:grid-cols-[82px_minmax(0,1fr)] sm:gap-3">
             <time className="text-xs font-semibold text-stone-500">{formatTime(event.timestamp)}</time>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">

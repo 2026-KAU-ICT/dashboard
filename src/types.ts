@@ -28,6 +28,7 @@ export type WorkerTelemetry = {
 
 export type GatewayPayload = {
   worker_id: string;
+  gateway_id?: string;
   floor: FloorId;
   status: WorkerStatus;
   is_hooked: boolean;
@@ -36,6 +37,8 @@ export type GatewayPayload = {
   battery?: number;
   telemetry?: Partial<WorkerTelemetry>;
 };
+
+export type GatewayRawPayload = Record<string, unknown>;
 
 export type Worker = GatewayPayload & {
   name: string;
@@ -103,4 +106,13 @@ export type MapZone = {
   sourceHeight: number;
   metersWidth: number;
   metersHeight: number;
+};
+
+export type GatewayNode = {
+  id: string;
+  floor: FloorId;
+  status: 'online' | 'degraded' | 'offline';
+  rssi: number;
+  packets: number;
+  anchor: Coordinate;
 };

@@ -3,6 +3,7 @@ import type {
   AirbagState,
   EventLog,
   FloorId,
+  GatewayNode,
   LedMode,
   MapZone,
   Worker,
@@ -96,7 +97,7 @@ export const initialWorkers: Worker[] = [
     is_hooked: true,
     coords: { x: 39, y: 108 },
     timestamp: new Date().toISOString(),
-    telemetry: createTelemetry('NORMAL', { accelerationG: 1.1 }),
+    telemetry: createTelemetry('NORMAL', { accelerationG: 1.1, airbagCartridge: 'MISSING' }),
     trace: createTrace({ x: 39, y: 108 }, new Date().toISOString()),
     batteryHistory: [74, 72, 71, 69, 68],
     rssiHistory: [-52, -54, -55, -56, -55],
@@ -158,6 +159,15 @@ export const initialEvents: EventLog[] = [
     status: 'BATTERY',
     message: '배터리 부족 점검 필요',
   },
+  {
+    id: 'seed-4',
+    timestamp: new Date().toISOString(),
+    floor: '4F',
+    workerId: 'A004',
+    workerName: workerProfiles.A004.name,
+    status: 'MAINTENANCE',
+    message: '에어백 카트리지 장착 필요',
+  },
 ];
 
 export const defaultZoneSettings: Record<FloorId, ZoneSetting> = {
@@ -166,13 +176,13 @@ export const defaultZoneSettings: Record<FloorId, ZoneSetting> = {
   ROOF: { threshold: -64, dangerRadius: 10, center: { x: 112, y: 64 } },
 };
 
-export const gatewayNodes = [
-  { id: 'GW-3F-01', floor: '3F' as const, status: 'online', rssi: -57, packets: 128 },
-  { id: 'GW-3F-02', floor: '3F' as const, status: 'online', rssi: -61, packets: 116 },
-  { id: 'GW-4F-01', floor: '4F' as const, status: 'online', rssi: -54, packets: 139 },
-  { id: 'GW-4F-02', floor: '4F' as const, status: 'online', rssi: -59, packets: 133 },
-  { id: 'GW-RF-01', floor: 'ROOF' as const, status: 'online', rssi: -63, packets: 101 },
-  { id: 'GW-RF-02', floor: 'ROOF' as const, status: 'online', rssi: -66, packets: 96 },
+export const gatewayNodes: GatewayNode[] = [
+  { id: 'GW-3F-01', floor: '3F', status: 'online', rssi: -57, packets: 128, anchor: { x: 52, y: 42 } },
+  { id: 'GW-3F-02', floor: '3F', status: 'online', rssi: -61, packets: 116, anchor: { x: 152, y: 103 } },
+  { id: 'GW-4F-01', floor: '4F', status: 'online', rssi: -54, packets: 139, anchor: { x: 48, y: 105 } },
+  { id: 'GW-4F-02', floor: '4F', status: 'online', rssi: -59, packets: 133, anchor: { x: 146, y: 72 } },
+  { id: 'GW-RF-01', floor: 'ROOF', status: 'online', rssi: -63, packets: 101, anchor: { x: 144, y: 52 } },
+  { id: 'GW-RF-02', floor: 'ROOF', status: 'online', rssi: -66, packets: 96, anchor: { x: 76, y: 114 } },
 ];
 
 export const mapZones: MapZone[] = [
@@ -251,4 +261,9 @@ export const statusMeta: Record<
 };
 
 export const aerialImagePixels = { width: 1200, height: 760 };
-export const gatewayUrl = import.meta.env.VITE_GATEWAY_WS_URL as string | undefined;
+export const gatewayUrls = String(
+  import.meta.env.VITE_GATEWAY_WS_URLS ?? import.meta.env.VITE_GATEWAY_WS_URL ?? '',
+)
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean);

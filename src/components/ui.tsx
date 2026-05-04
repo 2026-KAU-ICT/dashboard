@@ -24,13 +24,13 @@ export function MetricCard({
   }[tone];
 
   return (
-    <article className={`flex min-h-32 items-center justify-between border bg-[#111411] p-4 shadow-panel ${toneClass}`}>
+    <article className={`flex min-h-28 items-center justify-between gap-3 border bg-[#111411] p-4 shadow-panel sm:min-h-32 ${toneClass}`}>
       <div>
         <p className="text-sm font-semibold text-stone-300">{label}</p>
-        <strong className="mt-1 block text-4xl font-black tracking-normal text-stone-50 sm:text-5xl">{value}</strong>
+        <strong className="mt-1 block text-3xl font-black tracking-normal text-stone-50 sm:text-5xl">{value}</strong>
         <p className="mt-2 text-xs font-medium text-stone-400">{helper}</p>
       </div>
-      <div className="flex h-12 w-12 items-center justify-center border border-white/10 bg-black/20">{icon}</div>
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center border border-white/10 bg-black/20 sm:h-12 sm:w-12">{icon}</div>
     </article>
   );
 }
@@ -39,7 +39,7 @@ export function InfoTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-white/10 bg-[#111411] p-2">
       <p className="text-[11px] font-semibold text-stone-500">{label}</p>
-      <p className="mt-1 truncate text-sm font-black text-stone-100">{value}</p>
+      <p className="mt-1 break-keep text-sm font-black text-stone-100">{value}</p>
     </div>
   );
 }

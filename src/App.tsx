@@ -22,7 +22,7 @@ import {
   defaultZoneSettings,
   floorLabels,
   gatewayNodes,
-  gatewayUrl,
+  gatewayUrls,
   initialEvents,
   initialWorkers,
   ledLabels,
@@ -47,6 +47,7 @@ import {
   createEvent,
   isInSafetyHookZone,
   normalizeGatewayPayload,
+  parseGatewayMessage,
 } from './lib/safety';
 
 function App() {
@@ -58,7 +59,7 @@ function App() {
   const [commandFeedback, setCommandFeedback] = useState('대기 중');
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [lastEmergencyKey, setLastEmergencyKey] = useState('');
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketsRef = useRef<WebSocket[]>([]);
   const sirenRef = useRef<{
     context: AudioContext;
     oscillator: OscillatorNode;
@@ -98,10 +99,22 @@ function App() {
             5,
             100,
           );
+          const airbagCartridge =
+            payload.telemetry?.airbagCartridge ??
+            (nextWorker.status === 'EMERGENCY'
+              ? nextWorker.telemetry.airbagCartridge
+              : worker.telemetry.airbagCartridge);
           const merged: Worker = {
             ...worker,
             ...nextWorker,
             battery: nextBattery,
+            gateway: nextWorker.gateway,
+            gateway_id: nextWorker.gateway_id,
+            telemetry: {
+              ...worker.telemetry,
+              ...nextWorker.telemetry,
+              airbagCartridge,
+            },
             trace: [...worker.trace, { ...nextWorker.coords, timestamp: nextWorker.timestamp }].slice(-28),
             batteryHistory: [...worker.batteryHistory, nextBattery].slice(-18),
             rssiHistory: [...worker.rssiHistory, nextWorker.telemetry.rssiDbm].slice(-18),
@@ -112,7 +125,7 @@ function App() {
       });
 
       const eventStatus: EventLog['status'] =
-        eventWorker.telemetry.airbagCartridge === 'USED'
+        eventWorker.telemetry.airbagCartridge !== 'CHARGED'
           ? 'MAINTENANCE'
           : eventWorker.battery <= 25
             ? 'BATTERY'
@@ -120,7 +133,9 @@ function App() {
       const eventMessage =
         message ??
         (eventStatus === 'MAINTENANCE'
-          ? '에어백 카트리지 교체 필요'
+          ? eventWorker.telemetry.airbagCartridge === 'MISSING'
+            ? '에어백 카트리지 장착 필요'
+            : '에어백 카트리지 교체 필요'
           : eventStatus === 'BATTERY'
             ? '배터리 부족 점검 필요'
             : statusMeta[eventWorker.status].eventText);
@@ -134,7 +149,7 @@ function App() {
   );
 
   useEffect(() => {
-    if (!gatewayUrl) {
+    if (!gatewayUrls.length) {
       setConnectionState('mock');
       let tick = 0;
       const timer = window.setInterval(() => {
@@ -174,24 +189,52 @@ function App() {
     }
 
     setConnectionState('connecting');
-    const socket = new WebSocket(gatewayUrl);
-    socketRef.current = socket;
+    const sockets = gatewayUrls.map((url) => new WebSocket(url));
+    socketsRef.current = sockets;
+    let disposed = false;
 
-    socket.addEventListener('open', () => setConnectionState('live'));
-    socket.addEventListener('close', () => setConnectionState('offline'));
-    socket.addEventListener('error', () => setConnectionState('offline'));
-    socket.addEventListener('message', (event) => {
-      try {
-        const payload = JSON.parse(event.data) as GatewayPayload;
-        pushWorkerUpdate(payload);
-      } catch {
-        setCommandFeedback('수신 데이터 형식 오류');
+    const syncConnectionState = () => {
+      if (disposed) {
+        return;
       }
+
+      const openCount = sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
+      if (openCount > 0) {
+        setConnectionState('live');
+        return;
+      }
+
+      const stillConnecting = sockets.some((socket) => socket.readyState === WebSocket.CONNECTING);
+      setConnectionState(stillConnecting ? 'connecting' : 'offline');
+    };
+
+    sockets.forEach((socket) => {
+      socket.addEventListener('open', syncConnectionState);
+      socket.addEventListener('close', syncConnectionState);
+      socket.addEventListener('error', syncConnectionState);
+      socket.addEventListener('message', (event) => {
+        if (disposed) {
+          return;
+        }
+
+        try {
+          const payloads = parseGatewayMessage(JSON.parse(event.data));
+          if (!payloads.length) {
+            setCommandFeedback('수신 데이터 필드 확인 필요');
+            return;
+          }
+
+          payloads.forEach((payload) => pushWorkerUpdate(payload));
+        } catch {
+          setCommandFeedback('수신 데이터 형식 오류');
+        }
+      });
     });
 
     return () => {
-      socket.close();
-      socketRef.current = null;
+      disposed = true;
+      sockets.forEach((socket) => socket.close());
+      socketsRef.current = [];
     };
   }, [pushWorkerUpdate, zoneSettings]);
 
@@ -293,9 +336,10 @@ function App() {
   const sendCommand = useCallback(
     (command: DownlinkCommand) => {
       const commandText = JSON.stringify(command);
-      if (connectionState === 'live' && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(commandText);
-        setCommandFeedback('게이트웨이 전송 완료');
+      const openSockets = socketsRef.current.filter((socket) => socket.readyState === WebSocket.OPEN);
+      if (connectionState === 'live' && openSockets.length > 0) {
+        openSockets.forEach((socket) => socket.send(commandText));
+        setCommandFeedback(`게이트웨이 ${openSockets.length}곳 전송 완료`);
       } else {
         setCommandFeedback('Mock 모드 명령 기록');
       }
@@ -438,11 +482,11 @@ function App() {
   };
 
   return (
-    <main className="min-h-screen bg-[#090b0a] px-4 py-4 text-stone-100 sm:px-5 lg:px-6">
+    <main className="min-h-screen bg-[#090b0a] px-3 py-3 text-stone-100 sm:px-5 sm:py-4 lg:px-6">
       <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4">
         <Header connectionState={connectionState} commandFeedback={commandFeedback} />
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             icon={<HardHat className="h-6 w-6" />}
             label="총 작업자"
@@ -473,7 +517,7 @@ function App() {
           />
         </section>
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             icon={<BrainCircuit className="h-6 w-6" />}
             label="예측 위험"
@@ -504,7 +548,7 @@ function App() {
           />
         </section>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_370px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(330px,370px)]">
           <SiteMap
             workers={workers}
             selectedFloor={selectedFloor}
@@ -515,7 +559,7 @@ function App() {
             onSelectWorker={setSelectedWorkerId}
           />
 
-          <aside className="grid gap-4 lg:grid-cols-2 xl:grid-cols-1">
+          <aside className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
             <ControlPanel
               selectedWorker={selectedWorker}
               zoneSettings={zoneSettings}

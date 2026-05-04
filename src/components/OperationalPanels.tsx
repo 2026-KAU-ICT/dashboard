@@ -16,28 +16,35 @@ export function OperationalPanels({
 
   return (
     <section className="grid gap-4 xl:grid-cols-3">
-      <GatewayMeshPanel />
+      <GatewayMeshPanel workers={workers} />
       <RiskPredictionPanel workers={rankedWorkers} />
       <TelemetryPanel worker={selectedWorker} />
     </section>
   );
 }
 
-function GatewayMeshPanel() {
+function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
   const averageRssi = Math.round(gatewayNodes.reduce((sum, node) => sum + node.rssi, 0) / gatewayNodes.length);
   const packetRate = gatewayNodes.reduce((sum, node) => sum + node.packets, 0);
+  const vestCountByGateway = workers.reduce<Record<string, number>>((counts, worker) => {
+    counts[worker.gateway] = (counts[worker.gateway] ?? 0) + 1;
+    return counts;
+  }, {});
 
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
-      <PanelHeader icon={<Network className="h-5 w-5 text-emerald-300" />} title="BLE Mesh 네트워크" right={`${averageRssi} dBm`} />
+      <PanelHeader icon={<Network className="h-5 w-5 text-emerald-300" />} title="게이트웨이 브리지" right={`${averageRssi} dBm`} />
       <div className="space-y-3 p-4">
         <div className="grid grid-cols-2 gap-2">
           <InfoTile label="Gateway" value={`${gatewayNodes.length} online`} />
           <InfoTile label="Packet" value={`${packetRate}/min`} />
         </div>
+        <div className="border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-100">
+          조끼 BLE → 가까운 게이트웨이 → WebSocket 대시보드
+        </div>
         <div className="space-y-2">
           {gatewayNodes.map((node) => (
-            <div key={node.id} className="grid grid-cols-[88px_1fr_56px] items-center gap-2 text-xs">
+            <div key={node.id} className="grid grid-cols-[76px_1fr_72px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_84px]">
               <span className="font-bold text-stone-200">{node.id}</span>
               <div className="h-2 bg-white/10">
                 <div
@@ -45,7 +52,9 @@ function GatewayMeshPanel() {
                   style={{ width: `${clamp(100 - Math.abs(node.rssi + 45) * 3, 24, 96)}%` }}
                 />
               </div>
-              <span className="text-right font-semibold text-stone-400">{floorLabels[node.floor]}</span>
+              <span className="text-right font-semibold text-stone-400">
+                {floorLabels[node.floor]} · {vestCountByGateway[node.id] ?? 0}개
+              </span>
             </div>
           ))}
         </div>
@@ -100,13 +109,18 @@ function TelemetryPanel({ worker }: { worker?: Worker }) {
     const spike = worker.status === 'EMERGENCY' && index === 12 ? worker.telemetry.impactPeakG * 11 : 0;
     return clamp(42 - base - spike, 8, 76);
   });
+  const confidenceSamples = Array.from({ length: 18 }, (_, index) => {
+    const trend = worker.telemetry.fallConfidence - (17 - index) * 2.6 + Math.sin(index * 0.7) * 5;
+    return clamp(trend, 0, 100);
+  });
+  const latencyScore = clamp(Math.round(((200 - worker.telemetry.latencyMs) / 200) * 100), 0, 100);
   const path = samples.map((y, index) => `${index === 0 ? 'M' : 'L'} ${index * 14} ${y}`).join(' ');
 
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
       <PanelHeader icon={<Waves className="h-5 w-5 text-cyan-200" />} title="센서 텔레메트리" right={worker.worker_id} />
       <div className="p-4">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <InfoTile label="Battery" value={`${Math.round(worker.battery)}%`} />
           <InfoTile label="RSSI" value={`${worker.telemetry.rssiDbm} dBm`} />
           <InfoTile label="6축 IMU" value={`${worker.telemetry.accelerationG.toFixed(1)}g`} />
@@ -120,13 +134,35 @@ function TelemetryPanel({ worker }: { worker?: Worker }) {
             <path d={path} fill="none" stroke={worker.status === 'EMERGENCY' ? '#f87171' : '#67e8f9'} strokeWidth="3" />
           </svg>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
           <MiniSparkline title="Battery" values={worker.batteryHistory} min={0} max={100} tone={worker.battery <= 25 ? 'red' : 'emerald'} unit="%" />
           <MiniSparkline title="RSSI" values={worker.rssiHistory} min={-90} max={-45} tone={worker.telemetry.rssiDbm <= -72 ? 'red' : 'cyan'} unit="dBm" />
+          <MiniSparkline
+            title="Fall AI"
+            values={confidenceSamples}
+            min={0}
+            max={100}
+            tone={worker.telemetry.fallConfidence >= 70 ? 'red' : 'cyan'}
+            unit="%"
+          />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <InfoTile label="Airbag" value={`${airbagLabels[worker.telemetry.airbagState]} · ${cartridgeLabels[worker.telemetry.airbagCartridge]}`} />
           <InfoTile label="Edge Logic" value={worker.telemetry.latencyMs <= 200 ? '0.2s 이내' : '지연'} />
+        </div>
+        <div className="mt-3 border border-white/10 bg-black/25 p-3">
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className="text-stone-400">0.2초 판정 SLA</span>
+            <span className={worker.telemetry.latencyMs <= 200 ? 'text-emerald-100' : 'text-red-200'}>
+              {worker.telemetry.latencyMs}ms
+            </span>
+          </div>
+          <div className="mt-2 h-2 bg-white/10">
+            <div
+              className={worker.telemetry.latencyMs <= 200 ? 'h-full bg-emerald-300' : 'h-full bg-red-400'}
+              style={{ width: `${latencyScore}%` }}
+            />
+          </div>
         </div>
       </div>
     </section>
