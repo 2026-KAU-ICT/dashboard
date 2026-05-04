@@ -3,3 +3,5 @@ dist/
 .env
 .DS_Store
 *.log
+tmp_pdf_text/
+tmp_pdf_images/
