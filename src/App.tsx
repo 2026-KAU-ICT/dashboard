@@ -30,7 +30,6 @@ import {
   QUERY_KEYS,
   defaultZoneSettings,
   floorLabels,
-  gatewayNodes,
   gatewayUrls,
   initialEvents,
   initialWorkers,
@@ -48,7 +47,6 @@ import type {
   LedMode,
   Worker,
   WorkerStatus,
-  ZoneSetting,
 } from './types';
 import { clamp, createTelemetry } from './lib/base';
 import {

@@ -45,10 +45,6 @@ function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
   });
   const averageRssi = Math.round(enrichedNodes.reduce((sum, node) => sum + node.liveRssi, 0) / enrichedNodes.length);
   const packetRate = gatewayNodes.reduce((sum, node) => sum + node.packets, 0) + workers.length * 12;
-  const vestCountByGateway = workers.reduce<Record<string, number>>((counts, worker) => {
-    counts[worker.gateway] = (counts[worker.gateway] ?? 0) + 1;
-    return counts;
-  }, {});
 
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
@@ -74,7 +70,7 @@ function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
                 />
               </div>
               <span className="text-right font-semibold text-stone-400">
-                {node.liveRssi} dBm · {vestCountByGateway[node.id] ?? 0}개
+                {node.liveRssi} dBm · {node.vestCount}개
               </span>
               <span className="col-start-2 text-[11px] font-semibold text-stone-500">
                 {floorLabels[node.floor]} BLE mesh · {node.status}

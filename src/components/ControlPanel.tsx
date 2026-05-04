@@ -1,5 +1,5 @@
 import { Cpu, Lightbulb, Megaphone, Settings2, SlidersHorizontal, UsersRound, Volume2 } from 'lucide-react';
-import { airbagLabels, cartridgeLabels, floorLabels, ledLabels } from '../config/dashboard';
+import { cartridgeLabels, floorLabels, ledLabels } from '../config/dashboard';
 import { calculateWorkerRisk, mapWorkerToZone } from '../lib/safety';
 import type { FloorId, LedMode, Worker, ZoneSetting } from '../types';
 import { InfoTile, StatusBadge } from './ui';
