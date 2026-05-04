@@ -695,7 +695,7 @@ function App() {
           </aside>
         </div>
 
-        <OperationalPanels workers={workers} selectedWorker={selectedWorker} />
+        <OperationalPanels workers={workers} selectedWorker={selectedWorker} zoneSettings={zoneSettings} />
       </div>
 
       {activeEmergency && (

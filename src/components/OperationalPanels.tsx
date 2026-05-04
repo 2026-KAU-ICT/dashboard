@@ -1,31 +1,50 @@
-import { BrainCircuit, Network, Waves } from 'lucide-react';
+import { BellRing, BrainCircuit, CheckCircle2, Network, Radio, TimerReset, Waves } from 'lucide-react';
 import { airbagLabels, cartridgeLabels, floorLabels, gatewayNodes, statusMeta } from '../config/dashboard';
 import { clamp } from '../lib/base';
 import { calculateWorkerRisk, isInSafetyHookZone } from '../lib/safety';
-import type { Worker } from '../types';
+import type { FloorId, Worker, ZoneSetting } from '../types';
 import { InfoTile, MiniSparkline, PanelHeader } from './ui';
 
 export function OperationalPanels({
   workers,
   selectedWorker,
+  zoneSettings,
 }: {
   workers: Worker[];
   selectedWorker?: Worker;
+  zoneSettings: Record<FloorId, ZoneSetting>;
 }) {
   const rankedWorkers = [...workers].sort((a, b) => calculateWorkerRisk(b) - calculateWorkerRisk(a)).slice(0, 4);
 
   return (
-    <section className="grid gap-4 xl:grid-cols-3">
+    <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
       <GatewayMeshPanel workers={workers} />
-      <RiskPredictionPanel workers={rankedWorkers} />
+      <RiskPredictionPanel workers={rankedWorkers} zoneSettings={zoneSettings} />
       <TelemetryPanel worker={selectedWorker} />
+      <IncidentResponsePanel worker={selectedWorker} />
     </section>
   );
 }
 
 function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
-  const averageRssi = Math.round(gatewayNodes.reduce((sum, node) => sum + node.rssi, 0) / gatewayNodes.length);
-  const packetRate = gatewayNodes.reduce((sum, node) => sum + node.packets, 0);
+  const enrichedNodes = gatewayNodes.map((node) => {
+    const nodeWorkers = workers.filter((worker) => worker.gateway === node.id);
+    const liveRssi = nodeWorkers.length
+      ? Math.round(nodeWorkers.reduce((sum, worker) => sum + worker.telemetry.rssiDbm, 0) / nodeWorkers.length)
+      : node.rssi;
+    const quality = clamp(100 - Math.abs(liveRssi + 45) * 3, 24, 96);
+    const status = liveRssi <= -74 ? '주의' : liveRssi <= -67 ? '보통' : '안정';
+
+    return {
+      ...node,
+      liveRssi,
+      quality,
+      status,
+      vestCount: nodeWorkers.length,
+    };
+  });
+  const averageRssi = Math.round(enrichedNodes.reduce((sum, node) => sum + node.liveRssi, 0) / enrichedNodes.length);
+  const packetRate = gatewayNodes.reduce((sum, node) => sum + node.packets, 0) + workers.length * 12;
   const vestCountByGateway = workers.reduce<Record<string, number>>((counts, worker) => {
     counts[worker.gateway] = (counts[worker.gateway] ?? 0) + 1;
     return counts;
@@ -43,17 +62,22 @@ function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
           조끼 BLE → 가까운 게이트웨이 → WebSocket 대시보드
         </div>
         <div className="space-y-2">
-          {gatewayNodes.map((node) => (
-            <div key={node.id} className="grid grid-cols-[76px_1fr_72px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_84px]">
+          {enrichedNodes.map((node) => (
+            <div key={node.id} className="grid grid-cols-[76px_1fr_92px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_110px]">
               <span className="font-bold text-stone-200">{node.id}</span>
               <div className="h-2 bg-white/10">
                 <div
-                  className="h-full bg-emerald-300"
-                  style={{ width: `${clamp(100 - Math.abs(node.rssi + 45) * 3, 24, 96)}%` }}
+                  className={`h-full ${
+                    node.liveRssi <= -74 ? 'bg-red-400' : node.liveRssi <= -67 ? 'bg-amber-300' : 'bg-emerald-300'
+                  }`}
+                  style={{ width: `${node.quality}%` }}
                 />
               </div>
               <span className="text-right font-semibold text-stone-400">
-                {floorLabels[node.floor]} · {vestCountByGateway[node.id] ?? 0}개
+                {node.liveRssi} dBm · {vestCountByGateway[node.id] ?? 0}개
+              </span>
+              <span className="col-start-2 text-[11px] font-semibold text-stone-500">
+                {floorLabels[node.floor]} BLE mesh · {node.status}
               </span>
             </div>
           ))}
@@ -63,14 +87,20 @@ function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
   );
 }
 
-function RiskPredictionPanel({ workers }: { workers: Worker[] }) {
+function RiskPredictionPanel({
+  workers,
+  zoneSettings,
+}: {
+  workers: Worker[];
+  zoneSettings: Record<FloorId, ZoneSetting>;
+}) {
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
       <PanelHeader icon={<BrainCircuit className="h-5 w-5 text-amber-200" />} title="위험 패턴 분석" right="예측" />
       <div className="space-y-3 p-4">
         {workers.map((worker) => {
           const risk = calculateWorkerRisk(worker);
-          const danger = !worker.is_hooked && isInSafetyHookZone(worker);
+          const danger = !worker.is_hooked && isInSafetyHookZone(worker, zoneSettings);
 
           return (
             <article key={worker.worker_id} className="border border-white/10 bg-black/20 p-3">
@@ -163,6 +193,88 @@ function TelemetryPanel({ worker }: { worker?: Worker }) {
               style={{ width: `${latencyScore}%` }}
             />
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function IncidentResponsePanel({ worker }: { worker?: Worker }) {
+  if (!worker) {
+    return null;
+  }
+
+  const packetAgeMs = Math.max(0, Date.now() - new Date(worker.timestamp).getTime());
+  const packetAge = packetAgeMs < 1000 ? `${packetAgeMs}ms` : `${Math.round(packetAgeMs / 1000)}s`;
+  const isFallSuspected = worker.status === 'EMERGENCY' || worker.telemetry.fallConfidence >= 70;
+  const steps = [
+    {
+      label: '센서 수집',
+      value: worker.is_hooked ? '고리 체결' : '미체결',
+      detail: `${worker.telemetry.accelerationG.toFixed(1)}g IMU`,
+      icon: Radio,
+      active: true,
+    },
+    {
+      label: '엣지 판단',
+      value: isFallSuspected ? '추락 의심' : '정상 감시',
+      detail: `${worker.telemetry.fallConfidence}% confidence`,
+      icon: BrainCircuit,
+      active: isFallSuspected || worker.status === 'WARNING',
+    },
+    {
+      label: '에어백/LED',
+      value: airbagLabels[worker.telemetry.airbagState],
+      detail: cartridgeLabels[worker.telemetry.airbagCartridge],
+      icon: BellRing,
+      active: worker.telemetry.airbagState !== 'READY' || worker.telemetry.ledMode === 'FLASH',
+    },
+    {
+      label: '관제 반영',
+      value: worker.telemetry.latencyMs <= 200 ? '0.2s 이내' : '지연 확인',
+      detail: `${worker.telemetry.latencyMs}ms WebSocket`,
+      icon: TimerReset,
+      active: worker.telemetry.latencyMs <= 200,
+    },
+  ];
+
+  return (
+    <section className="border border-white/10 bg-[#101310] shadow-panel">
+      <PanelHeader icon={<CheckCircle2 className="h-5 w-5 text-emerald-300" />} title="사고 대응 플로우" right={worker.worker_id} />
+      <div className="p-4">
+        <div className="grid grid-cols-2 gap-2">
+          <InfoTile label="최근 패킷" value={packetAge} />
+          <InfoTile label="대응 단계" value={worker.status === 'EMERGENCY' ? '비상' : worker.status === 'WARNING' ? '경고' : '감시'} />
+        </div>
+        <div className="mt-4 space-y-3">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+            return (
+              <div key={step.label} className="grid grid-cols-[32px_1fr] gap-3">
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center border ${
+                      step.active
+                        ? 'border-emerald-300/45 bg-emerald-300 text-emerald-950'
+                        : 'border-white/10 bg-black/25 text-stone-500'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  {index < steps.length - 1 ? <div className="h-7 w-px bg-white/10" /> : null}
+                </div>
+                <div className="pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="text-sm text-stone-100">{step.label}</strong>
+                    <span className={step.active ? 'text-xs font-black text-emerald-100' : 'text-xs font-bold text-stone-500'}>
+                      {step.value}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs font-semibold text-stone-500">{step.detail}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>
