@@ -3,6 +3,7 @@ import type {
   AirbagState,
   EventLog,
   FloorId,
+  GatewayZoneSetting,
   GatewayNode,
   LedMode,
   MapZone,
@@ -18,9 +19,10 @@ export const QUERY_KEYS = {
 };
 
 export const floorLabels: Record<FloorId, string> = {
+  '1F': '1층',
+  '2F': '2층',
   '3F': '3층',
   '4F': '4층',
-  ROOF: '옥상',
 };
 
 export const airbagLabels: Record<AirbagState, string> = {
@@ -44,10 +46,10 @@ export const ledLabels: Record<LedMode, string> = {
 export const workerProfiles: Record<string, Pick<Worker, 'name' | 'role' | 'battery' | 'gateway'>> = {
   A001: { name: '김도윤', role: '철근', battery: 86, gateway: 'GW-4F-02' },
   A002: { name: '박민재', role: '거푸집', battery: 74, gateway: 'GW-3F-01' },
-  A003: { name: '이서준', role: '전기', battery: 91, gateway: 'GW-RF-01' },
+  A003: { name: '이서준', role: '전기', battery: 91, gateway: 'GW-2F-01' },
   A004: { name: '최하린', role: '안전', battery: 68, gateway: 'GW-4F-01' },
   A005: { name: '정우진', role: '양중', battery: 79, gateway: 'GW-3F-02' },
-  A006: { name: '윤태오', role: '배관', battery: 24, gateway: 'GW-RF-02' },
+  A006: { name: '윤태오', role: '배관', battery: 24, gateway: 'GW-1F-02' },
 };
 
 export const initialWorkers: Worker[] = [
@@ -79,7 +81,7 @@ export const initialWorkers: Worker[] = [
   },
   {
     worker_id: 'A003',
-    floor: 'ROOF',
+    floor: '2F',
     status: 'NORMAL',
     is_hooked: true,
     coords: { x: 151, y: 56 },
@@ -118,7 +120,7 @@ export const initialWorkers: Worker[] = [
   },
   {
     worker_id: 'A006',
-    floor: 'ROOF',
+    floor: '1F',
     status: 'WARNING',
     is_hooked: false,
     coords: { x: 92, y: 112 },
@@ -144,16 +146,16 @@ export const initialEvents: EventLog[] = [
   {
     id: 'seed-2',
     timestamp: new Date().toISOString(),
-    floor: 'ROOF',
+    floor: '1F',
     workerId: 'A006',
     workerName: workerProfiles.A006.name,
     status: 'WARNING',
-    message: '옥상 안전 훅 존 임계값 초과',
+    message: '1층 안전 훅 존 임계값 초과',
   },
   {
     id: 'seed-3',
     timestamp: new Date().toISOString(),
-    floor: 'ROOF',
+    floor: '1F',
     workerId: 'A006',
     workerName: workerProfiles.A006.name,
     status: 'BATTERY',
@@ -171,59 +173,118 @@ export const initialEvents: EventLog[] = [
 ];
 
 export const defaultZoneSettings: Record<FloorId, ZoneSetting> = {
+  '1F': { threshold: -66, dangerRadius: 9, center: { x: 104, y: 74 } },
+  '2F': { threshold: -69, dangerRadius: 8, center: { x: 120, y: 64 } },
   '3F': { threshold: -68, dangerRadius: 8, center: { x: 116, y: 68 } },
   '4F': { threshold: -71, dangerRadius: 6, center: { x: 114, y: 66 } },
-  ROOF: { threshold: -64, dangerRadius: 10, center: { x: 112, y: 64 } },
 };
 
 export const gatewayNodes: GatewayNode[] = [
+  { id: 'GW-1F-01', floor: '1F', status: 'online', rssi: -55, packets: 142, anchor: { x: 48, y: 46 } },
+  { id: 'GW-1F-02', floor: '1F', status: 'online', rssi: -62, packets: 124, anchor: { x: 148, y: 48 } },
+  { id: 'GW-1F-03', floor: '1F', status: 'online', rssi: -59, packets: 118, anchor: { x: 154, y: 110 } },
+  { id: 'GW-1F-04', floor: '1F', status: 'online', rssi: -66, packets: 103, anchor: { x: 54, y: 112 } },
+  { id: 'GW-2F-01', floor: '2F', status: 'online', rssi: -56, packets: 136, anchor: { x: 52, y: 44 } },
+  { id: 'GW-2F-02', floor: '2F', status: 'online', rssi: -60, packets: 127, anchor: { x: 150, y: 50 } },
+  { id: 'GW-2F-03', floor: '2F', status: 'online', rssi: -64, packets: 111, anchor: { x: 148, y: 108 } },
+  { id: 'GW-2F-04', floor: '2F', status: 'online', rssi: -61, packets: 119, anchor: { x: 50, y: 106 } },
   { id: 'GW-3F-01', floor: '3F', status: 'online', rssi: -57, packets: 128, anchor: { x: 52, y: 42 } },
   { id: 'GW-3F-02', floor: '3F', status: 'online', rssi: -61, packets: 116, anchor: { x: 152, y: 103 } },
+  { id: 'GW-3F-03', floor: '3F', status: 'online', rssi: -60, packets: 109, anchor: { x: 150, y: 42 } },
+  { id: 'GW-3F-04', floor: '3F', status: 'online', rssi: -64, packets: 98, anchor: { x: 54, y: 104 } },
   { id: 'GW-4F-01', floor: '4F', status: 'online', rssi: -54, packets: 139, anchor: { x: 48, y: 105 } },
   { id: 'GW-4F-02', floor: '4F', status: 'online', rssi: -59, packets: 133, anchor: { x: 146, y: 72 } },
-  { id: 'GW-RF-01', floor: 'ROOF', status: 'online', rssi: -63, packets: 101, anchor: { x: 144, y: 52 } },
-  { id: 'GW-RF-02', floor: 'ROOF', status: 'online', rssi: -66, packets: 96, anchor: { x: 76, y: 114 } },
+  { id: 'GW-4F-03', floor: '4F', status: 'online', rssi: -58, packets: 121, anchor: { x: 52, y: 44 } },
+  { id: 'GW-4F-04', floor: '4F', status: 'online', rssi: -63, packets: 105, anchor: { x: 154, y: 108 } },
 ];
+
+export const defaultGatewayZoneSettings: Record<FloorId, GatewayZoneSetting> = {
+  '1F': {
+    anchors: [
+      { id: 'GW-1F-01', label: 'GW-01', x: 48, y: 46 },
+      { id: 'GW-1F-02', label: 'GW-02', x: 148, y: 48 },
+      { id: 'GW-1F-03', label: 'GW-03', x: 154, y: 110 },
+      { id: 'GW-1F-04', label: 'GW-04', x: 54, y: 112 },
+    ],
+  },
+  '2F': {
+    anchors: [
+      { id: 'GW-2F-01', label: 'GW-01', x: 52, y: 44 },
+      { id: 'GW-2F-02', label: 'GW-02', x: 150, y: 50 },
+      { id: 'GW-2F-03', label: 'GW-03', x: 148, y: 108 },
+      { id: 'GW-2F-04', label: 'GW-04', x: 50, y: 106 },
+    ],
+  },
+  '3F': {
+    anchors: [
+      { id: 'GW-3F-01', label: 'GW-01', x: 52, y: 42 },
+      { id: 'GW-3F-03', label: 'GW-03', x: 150, y: 42 },
+      { id: 'GW-3F-02', label: 'GW-02', x: 152, y: 103 },
+      { id: 'GW-3F-04', label: 'GW-04', x: 54, y: 104 },
+    ],
+  },
+  '4F': {
+    anchors: [
+      { id: 'GW-4F-03', label: 'GW-03', x: 52, y: 44 },
+      { id: 'GW-4F-02', label: 'GW-02', x: 146, y: 72 },
+      { id: 'GW-4F-04', label: 'GW-04', x: 154, y: 108 },
+      { id: 'GW-4F-01', label: 'GW-01', x: 48, y: 105 },
+    ],
+  },
+};
 
 export const mapZones: MapZone[] = [
   {
-    floor: '3F',
-    left: 14,
-    top: 12,
-    width: 30,
-    height: 56,
+    floor: '1F',
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
     color: 'rgba(52, 211, 153, 0.1)',
     border: 'rgba(52, 211, 153, 0.72)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 46,
-    metersHeight: 34,
+    metersWidth: 68,
+    metersHeight: 42,
   },
   {
-    floor: '4F',
-    left: 38,
-    top: 12,
-    width: 31,
-    height: 56,
+    floor: '2F',
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
     color: 'rgba(56, 189, 248, 0.1)',
     border: 'rgba(56, 189, 248, 0.72)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 48,
-    metersHeight: 34,
+    metersWidth: 68,
+    metersHeight: 42,
   },
   {
-    floor: 'ROOF',
-    left: 64,
-    top: 12,
-    width: 25,
-    height: 56,
+    floor: '3F',
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
     color: 'rgba(245, 158, 11, 0.11)',
     border: 'rgba(245, 158, 11, 0.74)',
     sourceWidth: 200,
     sourceHeight: 140,
-    metersWidth: 40,
-    metersHeight: 34,
+    metersWidth: 68,
+    metersHeight: 42,
+  },
+  {
+    floor: '4F',
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
+    color: 'rgba(248, 113, 113, 0.1)',
+    border: 'rgba(248, 113, 113, 0.7)',
+    sourceWidth: 200,
+    sourceHeight: 140,
+    metersWidth: 68,
+    metersHeight: 42,
   },
 ];
 

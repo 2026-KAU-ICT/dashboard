@@ -1,16 +1,19 @@
-import { BellRing, BrainCircuit, CheckCircle2, Network, Radio, TimerReset, Waves } from 'lucide-react';
+import { BrainCircuit, Network, Waves } from 'lucide-react';
 import { airbagLabels, cartridgeLabels, floorLabels, gatewayNodes, statusMeta } from '../config/dashboard';
 import { clamp } from '../lib/base';
 import { calculateWorkerRisk, isInSafetyHookZone } from '../lib/safety';
-import type { FloorId, Worker, ZoneSetting } from '../types';
+import type { EventLog, FloorId, Worker, ZoneSetting } from '../types';
+import { NotificationPanel } from './NotificationPanel';
 import { InfoTile, MiniSparkline, PanelHeader } from './ui';
 
 export function OperationalPanels({
   workers,
+  events,
   selectedWorker,
   zoneSettings,
 }: {
   workers: Worker[];
+  events: EventLog[];
   selectedWorker?: Worker;
   zoneSettings: Record<FloorId, ZoneSetting>;
 }) {
@@ -21,7 +24,7 @@ export function OperationalPanels({
       <GatewayMeshPanel workers={workers} />
       <RiskPredictionPanel workers={rankedWorkers} zoneSettings={zoneSettings} />
       <TelemetryPanel worker={selectedWorker} />
-      <IncidentResponsePanel worker={selectedWorker} />
+      <NotificationPanel events={events} workers={workers} />
     </section>
   );
 }
@@ -189,88 +192,6 @@ function TelemetryPanel({ worker }: { worker?: Worker }) {
               style={{ width: `${latencyScore}%` }}
             />
           </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function IncidentResponsePanel({ worker }: { worker?: Worker }) {
-  if (!worker) {
-    return null;
-  }
-
-  const packetAgeMs = Math.max(0, Date.now() - new Date(worker.timestamp).getTime());
-  const packetAge = packetAgeMs < 1000 ? `${packetAgeMs}ms` : `${Math.round(packetAgeMs / 1000)}s`;
-  const isFallSuspected = worker.status === 'EMERGENCY' || worker.telemetry.fallConfidence >= 70;
-  const steps = [
-    {
-      label: '센서 수집',
-      value: worker.is_hooked ? '고리 체결' : '미체결',
-      detail: `${worker.telemetry.accelerationG.toFixed(1)}g IMU`,
-      icon: Radio,
-      active: true,
-    },
-    {
-      label: '엣지 판단',
-      value: isFallSuspected ? '추락 의심' : '정상 감시',
-      detail: `${worker.telemetry.fallConfidence}% confidence`,
-      icon: BrainCircuit,
-      active: isFallSuspected || worker.status === 'WARNING',
-    },
-    {
-      label: '에어백/LED',
-      value: airbagLabels[worker.telemetry.airbagState],
-      detail: cartridgeLabels[worker.telemetry.airbagCartridge],
-      icon: BellRing,
-      active: worker.telemetry.airbagState !== 'READY' || worker.telemetry.ledMode === 'FLASH',
-    },
-    {
-      label: '관제 반영',
-      value: worker.telemetry.latencyMs <= 200 ? '0.2s 이내' : '지연 확인',
-      detail: `${worker.telemetry.latencyMs}ms WebSocket`,
-      icon: TimerReset,
-      active: worker.telemetry.latencyMs <= 200,
-    },
-  ];
-
-  return (
-    <section className="border border-white/10 bg-[#101310] shadow-panel">
-      <PanelHeader icon={<CheckCircle2 className="h-5 w-5 text-emerald-300" />} title="사고 대응 플로우" right={worker.worker_id} />
-      <div className="p-4">
-        <div className="grid grid-cols-2 gap-2">
-          <InfoTile label="최근 패킷" value={packetAge} />
-          <InfoTile label="대응 단계" value={worker.status === 'EMERGENCY' ? '비상' : worker.status === 'WARNING' ? '경고' : '감시'} />
-        </div>
-        <div className="mt-4 space-y-3">
-          {steps.map((step, index) => {
-            const Icon = step.icon;
-            return (
-              <div key={step.label} className="grid grid-cols-[32px_1fr] gap-3">
-                <div className="flex flex-col items-center">
-                  <div
-                    className={`flex h-8 w-8 items-center justify-center border ${
-                      step.active
-                        ? 'border-emerald-300/45 bg-emerald-300 text-emerald-950'
-                        : 'border-white/10 bg-black/25 text-stone-500'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  {index < steps.length - 1 ? <div className="h-7 w-px bg-white/10" /> : null}
-                </div>
-                <div className="pb-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <strong className="text-sm text-stone-100">{step.label}</strong>
-                    <span className={step.active ? 'text-xs font-black text-emerald-100' : 'text-xs font-bold text-stone-500'}>
-                      {step.value}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs font-semibold text-stone-500">{step.detail}</p>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
     </section>

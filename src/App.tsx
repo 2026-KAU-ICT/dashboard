@@ -22,12 +22,12 @@ import {
 } from './components/EmergencyActionDialog';
 import { EmergencyOverlay } from './components/EmergencyOverlay';
 import { Header } from './components/Header';
-import { NotificationPanel } from './components/NotificationPanel';
 import { OperationalPanels } from './components/OperationalPanels';
 import { SiteMap } from './components/SiteMap';
 import { MetricCard } from './components/ui';
 import {
   QUERY_KEYS,
+  defaultGatewayZoneSettings,
   defaultZoneSettings,
   floorLabels,
   gatewayUrls,
@@ -43,7 +43,9 @@ import type {
   EventLog,
   FloorFilter,
   FloorId,
+  GatewayAnchor,
   GatewayPayload,
+  GatewayZoneSetting,
   LedMode,
   Worker,
   WorkerStatus,
@@ -59,12 +61,15 @@ import {
 
 function App() {
   const queryClient = useQueryClient();
-  const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('ALL');
-  const [selectedWorkerId, setSelectedWorkerId] = useState('A001');
+  const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('3F');
+  const [selectedWorkerId, setSelectedWorkerId] = useState('A002');
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [zoneSettings, setZoneSettings] = useState(defaultZoneSettings);
   const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
   const [editingZoneFloors, setEditingZoneFloors] = useState<FloorId[]>([]);
+  const [gatewayZoneSettings, setGatewayZoneSettings] = useState(defaultGatewayZoneSettings);
+  const [draftGatewayZoneSettings, setDraftGatewayZoneSettings] = useState(defaultGatewayZoneSettings);
+  const [editingGatewayZoneFloors, setEditingGatewayZoneFloors] = useState<FloorId[]>([]);
   const [commandFeedback, setCommandFeedback] = useState('대기 중');
   const [activeEmergency, setActiveEmergency] = useState<Worker | null>(null);
   const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
@@ -90,9 +95,26 @@ function App() {
     initialData: initialEvents,
   });
 
+  const findNearestGatewayAnchor = useCallback(
+    (floor: FloorId, coords: Coordinate, settings: Record<FloorId, GatewayZoneSetting> = gatewayZoneSettings) =>
+      settings[floor].anchors
+        .map((anchor) => ({
+          anchor,
+          distance: Math.hypot(anchor.x - coords.x, anchor.y - coords.y),
+        }))
+        .sort((a, b) => a.distance - b.distance)[0]?.anchor,
+    [gatewayZoneSettings],
+  );
+
   const pushWorkerUpdate = useCallback(
     (payload: GatewayPayload, message?: string) => {
-      const nextWorker = normalizeGatewayPayload(payload);
+      const normalizedWorker = normalizeGatewayPayload(payload);
+      const calibratedGateway = payload.gateway_id ?? findNearestGatewayAnchor(payload.floor, payload.coords)?.id ?? normalizedWorker.gateway;
+      const nextWorker: Worker = {
+        ...normalizedWorker,
+        gateway_id: calibratedGateway,
+        gateway: calibratedGateway,
+      };
       let eventWorker = nextWorker;
       queryClient.setQueryData<Worker[]>(QUERY_KEYS.workers, (current = initialWorkers) => {
         const exists = current.some((worker) => worker.worker_id === nextWorker.worker_id);
@@ -156,7 +178,7 @@ function App() {
         ...current,
       ].slice(0, 60));
     },
-    [queryClient],
+    [findNearestGatewayAnchor, queryClient],
   );
 
   useEffect(() => {
@@ -254,6 +276,21 @@ function App() {
     [selectedWorkerId, workers],
   );
 
+  const changeFloor = useCallback(
+    (floor: FloorFilter) => {
+      setSelectedFloor(floor);
+      if (floor === 'ALL') {
+        return;
+      }
+
+      const floorWorker = workers.find((worker) => worker.floor === floor);
+      if (floorWorker) {
+        setSelectedWorkerId(floorWorker.worker_id);
+      }
+    },
+    [workers],
+  );
+
   const visibleZoneSettings = useMemo(() => {
     const next = { ...zoneSettings };
     editingZoneFloors.forEach((floor) => {
@@ -261,6 +298,14 @@ function App() {
     });
     return next;
   }, [draftZoneSettings, editingZoneFloors, zoneSettings]);
+
+  const visibleGatewayZoneSettings = useMemo(() => {
+    const next = { ...gatewayZoneSettings };
+    editingGatewayZoneFloors.forEach((floor) => {
+      next[floor] = draftGatewayZoneSettings[floor];
+    });
+    return next;
+  }, [draftGatewayZoneSettings, editingGatewayZoneFloors, gatewayZoneSettings]);
 
   const pendingEmergencyWorker = useMemo(() => {
     return [...workers]
@@ -341,6 +386,7 @@ function App() {
     }
 
     setSelectedWorkerId(pendingEmergencyWorker.worker_id);
+    setSelectedFloor(pendingEmergencyWorker.floor);
     setActiveEmergency(pendingEmergencyWorker);
     startSirenSound();
   }, [activeEmergency, pendingEmergencyWorker, startSirenSound]);
@@ -392,6 +438,8 @@ function App() {
             return `${workerName} 에어백 카트리지 교체 완료`;
           case 'UPDATE_ZONE':
             return `${floorLabels[command.floor]} 안전 훅 존 갱신`;
+          case 'UPDATE_GATEWAY_ZONE':
+            return `${floorLabels[command.floor]} 게이트웨이 존 갱신`;
         }
       })();
 
@@ -490,6 +538,57 @@ function App() {
         center,
       },
     }));
+  };
+
+  const beginGatewayZoneEdit = (floor: FloorId) => {
+    setDraftGatewayZoneSettings((current) => ({
+      ...current,
+      [floor]: gatewayZoneSettings[floor],
+    }));
+    setEditingGatewayZoneFloors((current) => (current.includes(floor) ? current : [...current, floor]));
+  };
+
+  const updateGatewayAnchor = (floor: FloorId, anchorId: string, coords: Coordinate) => {
+    setDraftGatewayZoneSettings((current) => ({
+      ...current,
+      [floor]: {
+        anchors: current[floor].anchors.map((anchor) =>
+          anchor.id === anchorId
+            ? {
+                ...anchor,
+                ...coords,
+              }
+            : anchor,
+        ),
+      },
+    }));
+  };
+
+  const applyGatewayZoneSetting = (floor: FloorId) => {
+    const setting = draftGatewayZoneSettings[floor];
+    setGatewayZoneSettings((current) => ({
+      ...current,
+      [floor]: setting,
+    }));
+    setEditingGatewayZoneFloors((current) => current.filter((editingFloor) => editingFloor !== floor));
+    sendCommand({
+      command: 'UPDATE_GATEWAY_ZONE',
+      floor,
+      anchors: setting.anchors.map((anchor): GatewayAnchor => ({ ...anchor })),
+    });
+    queryClient.setQueryData<Worker[]>(QUERY_KEYS.workers, (current = initialWorkers) =>
+      current.map((worker) => {
+        if (worker.floor !== floor || worker.gateway_id) {
+          return worker;
+        }
+
+        const nearest = findNearestGatewayAnchor(worker.floor, worker.coords, {
+          ...gatewayZoneSettings,
+          [floor]: setting,
+        });
+        return nearest ? { ...worker, gateway: nearest.id } : worker;
+      }),
+    );
   };
 
   const setSelectedLedMode = (mode: LedMode) => {
@@ -599,10 +698,10 @@ function App() {
 
   return (
     <main className="min-h-screen bg-[#090b0a] px-3 py-3 text-stone-100 sm:px-5 sm:py-4 lg:px-6">
-      <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-[1840px] flex-col gap-4">
         <Header connectionState={connectionState} commandFeedback={commandFeedback} />
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
           <MetricCard
             icon={<HardHat className="h-6 w-6" />}
             label="총 작업자"
@@ -631,9 +730,6 @@ function App() {
             helper="0.2s 표시 SLA"
             tone="cyan"
           />
-        </section>
-
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             icon={<BrainCircuit className="h-6 w-6" />}
             label="예측 위험"
@@ -664,23 +760,28 @@ function App() {
           />
         </section>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(330px,370px)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(330px,390px)] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]">
           <SiteMap
             workers={workers}
             selectedFloor={selectedFloor}
             selectedWorkerId={selectedWorker?.worker_id}
             zoneSettings={visibleZoneSettings}
             editableZoneFloors={editingZoneFloors}
+            gatewayZoneSettings={visibleGatewayZoneSettings}
+            editableGatewayZoneFloors={editingGatewayZoneFloors}
             onZoneCenterChange={updateZoneCenter}
-            onFloorChange={setSelectedFloor}
+            onGatewayAnchorChange={updateGatewayAnchor}
+            onFloorChange={changeFloor}
             onSelectWorker={setSelectedWorkerId}
           />
 
-          <aside className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+          <aside className="grid gap-4 xl:sticky xl:top-4 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
             <ControlPanel
               selectedWorker={selectedWorker}
               zoneSettings={visibleZoneSettings}
               editingZoneFloors={editingZoneFloors}
+              gatewayZoneSettings={visibleGatewayZoneSettings}
+              editingGatewayZoneFloors={editingGatewayZoneFloors}
               onActivateAlarm={activateSelectedAlarm}
               onBroadcastEvacuation={broadcastEvacuation}
               onLedModeChange={setSelectedLedMode}
@@ -688,12 +789,15 @@ function App() {
               onBeginZoneEdit={beginZoneEdit}
               onApplyZone={applyZoneSetting}
               onZoneChange={updateZoneSetting}
+              onBeginGatewayZoneEdit={beginGatewayZoneEdit}
+              onApplyGatewayZone={applyGatewayZoneSetting}
             />
-            <NotificationPanel events={events} workers={workers} />
           </aside>
-        </div>
 
-        <OperationalPanels workers={workers} selectedWorker={selectedWorker} zoneSettings={zoneSettings} />
+          <div className="min-w-0 xl:col-start-1 xl:row-start-2">
+            <OperationalPanels workers={workers} events={events} selectedWorker={selectedWorker} zoneSettings={zoneSettings} />
+          </div>
+        </div>
       </div>
 
       {activeEmergency && (

@@ -1,12 +1,23 @@
-import { Cpu, Lightbulb, Megaphone, Settings2, SlidersHorizontal, UsersRound, Volume2 } from 'lucide-react';
+import {
+  Cpu,
+  Lightbulb,
+  Megaphone,
+  RadioTower,
+  Settings2,
+  SlidersHorizontal,
+  UsersRound,
+  Volume2,
+  Waypoints,
+} from 'lucide-react';
 import { cartridgeLabels, floorLabels, ledLabels } from '../config/dashboard';
 import { calculateWorkerRisk, mapWorkerToZone } from '../lib/safety';
-import type { FloorId, LedMode, Worker, ZoneSetting } from '../types';
+import type { FloorId, GatewayZoneSetting, LedMode, Worker, ZoneSetting } from '../types';
 import { InfoTile, StatusBadge } from './ui';
 
 export function ControlPanel({
   selectedWorker,
   zoneSettings,
+  gatewayZoneSettings,
   onActivateAlarm,
   onBroadcastEvacuation,
   onLedModeChange,
@@ -14,10 +25,14 @@ export function ControlPanel({
   onZoneChange,
   onApplyZone,
   onBeginZoneEdit,
+  onApplyGatewayZone,
+  onBeginGatewayZoneEdit,
   editingZoneFloors,
+  editingGatewayZoneFloors,
 }: {
   selectedWorker?: Worker;
   zoneSettings: Record<FloorId, ZoneSetting>;
+  gatewayZoneSettings: Record<FloorId, GatewayZoneSetting>;
   onActivateAlarm: () => void;
   onBroadcastEvacuation: (floor: FloorId | 'ALL') => void;
   onLedModeChange: (mode: LedMode) => void;
@@ -25,7 +40,10 @@ export function ControlPanel({
   onZoneChange: (floor: FloorId, key: 'threshold' | 'dangerRadius', value: number) => void;
   onApplyZone: (floor: FloorId) => void;
   onBeginZoneEdit: (floor: FloorId) => void;
+  onApplyGatewayZone: (floor: FloorId) => void;
+  onBeginGatewayZoneEdit: (floor: FloorId) => void;
   editingZoneFloors: FloorId[];
+  editingGatewayZoneFloors: FloorId[];
 }) {
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
 
@@ -196,6 +214,68 @@ export function ControlPanel({
                     }}
                   />
                 </label>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
+            <Waypoints className="h-4 w-4 text-cyan-200" />
+            게이트웨이 존
+          </div>
+
+          {(Object.keys(gatewayZoneSettings) as FloorId[]).map((floor) => {
+            const setting = gatewayZoneSettings[floor];
+            const isEditing = editingGatewayZoneFloors.includes(floor);
+            return (
+              <div key={floor} className="border border-white/10 bg-black/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <strong className="text-sm text-stone-100">{floorLabels[floor]}</strong>
+                    <p className="mt-1 text-xs text-stone-500">ESP32 기준점 {setting.anchors.length}개 연결</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`border px-2 py-1 text-xs font-bold transition ${
+                      isEditing
+                        ? 'border-cyan-200/50 bg-cyan-200 text-cyan-950 hover:bg-cyan-100'
+                        : 'border-white/15 text-stone-200 hover:bg-white/10'
+                    }`}
+                    onClick={() => {
+                      if (isEditing) {
+                        onApplyGatewayZone(floor);
+                        return;
+                      }
+
+                      onBeginGatewayZoneEdit(floor);
+                    }}
+                  >
+                    {isEditing ? '적용' : '변경'}
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4 xl:grid-cols-2">
+                  {setting.anchors.map((anchor) => (
+                    <div
+                      key={anchor.id}
+                      className={`border px-2 py-2 ${
+                        isEditing ? 'border-cyan-200/25 bg-cyan-200/10 text-cyan-50' : 'border-white/10 bg-black/25 text-stone-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-black">
+                        <RadioTower className="h-3.5 w-3.5" />
+                        {anchor.label}
+                      </div>
+                      <p className="mt-1 font-semibold">
+                        {Math.round(anchor.x)}, {Math.round(anchor.y)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className={`mt-3 text-xs font-semibold ${isEditing ? 'text-cyan-100' : 'text-stone-500'}`}>
+                  {isEditing ? '지도 위 게이트웨이 점을 드래그한 뒤 적용하세요.' : '변경을 누르면 지도에서 기준점 위치를 수정할 수 있습니다.'}
+                </p>
               </div>
             );
           })}

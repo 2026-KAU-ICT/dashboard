@@ -1,5 +1,5 @@
 export type WorkerStatus = 'NORMAL' | 'WARNING' | 'EMERGENCY';
-export type FloorId = '3F' | '4F' | 'ROOF';
+export type FloorId = '1F' | '2F' | '3F' | '4F';
 export type FloorFilter = 'ALL' | FloorId;
 export type ConnectionState = 'connecting' | 'live' | 'mock' | 'offline';
 export type AirbagState = 'READY' | 'ARMED' | 'DEPLOYED';
@@ -86,12 +86,26 @@ export type DownlinkCommand =
   | {
       command: 'RESET_AIRBAG_CARTRIDGE';
       target_id: string;
+    }
+  | {
+      command: 'UPDATE_GATEWAY_ZONE';
+      floor: FloorId;
+      anchors: GatewayAnchor[];
     };
 
 export type ZoneSetting = {
   threshold: number;
   dangerRadius: number;
   center: Coordinate;
+};
+
+export type GatewayAnchor = Coordinate & {
+  id: string;
+  label: string;
+};
+
+export type GatewayZoneSetting = {
+  anchors: GatewayAnchor[];
 };
 
 export type MapZone = {
