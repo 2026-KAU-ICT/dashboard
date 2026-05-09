@@ -21,7 +21,7 @@ export function Header({
       <div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
           <RadioTower className="h-4 w-4" />
-          세이프티 훅 통합 관제 시스템
+          A-Hook 통합 관제 시스템
         </div>
         <h1 className="mt-2 text-2xl font-black tracking-normal text-stone-50 sm:text-3xl">
           실시간 안전 관제 대시보드

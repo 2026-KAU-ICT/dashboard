@@ -151,7 +151,7 @@ export const initialEvents: EventLog[] = [
     workerId: 'A006',
     workerName: workerProfiles.A006.name,
     status: 'WARNING',
-    message: '1층 안전 훅 존 임계값 초과',
+    message: '1층 A-Hook 존 임계값 초과',
   },
   {
     id: 'seed-3',
