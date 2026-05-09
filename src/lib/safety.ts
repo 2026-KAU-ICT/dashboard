@@ -1,5 +1,6 @@
 import {
   aerialImagePixels,
+  beaconAnchors,
   defaultZoneSettings,
   gatewayNodes,
   mapZones,
@@ -21,6 +22,11 @@ import type {
   ZoneSetting,
 } from '../types';
 import { clamp, createTelemetry, createTrace } from './base';
+
+type DetectedBeacon = {
+  id: string;
+  rssi: number;
+};
 
 export const calculateWorkerRisk = (worker: Worker) => {
   const statusScore = worker.status === 'EMERGENCY' ? 100 : worker.status === 'WARNING' ? 62 : 16;
@@ -83,11 +89,36 @@ export const findNearestGateway = (floor: FloorId, coords: Coordinate) => {
     .sort((a, b) => a.distance - b.distance)[0]?.node;
 };
 
+const beaconCalibrationAnchors = [
+  ...beaconAnchors,
+  ...gatewayNodes.map((node) => ({
+    id: node.id,
+    floor: node.floor,
+    label: node.id,
+    ...node.anchor,
+  })),
+];
+
 const isRecord = (value: unknown): value is GatewayRawPayload =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const readRecord = (source: GatewayRawPayload, key: string) =>
   isRecord(source[key]) ? source[key] : undefined;
+
+const readAnyRecord = (source: GatewayRawPayload, keys: string[]) => {
+  for (const key of keys) {
+    const record = readRecord(source, key);
+    if (record) {
+      return record;
+    }
+
+    const matchedKey = Object.keys(source).find((sourceKey) => sourceKey.toLowerCase() === key.toLowerCase());
+    if (matchedKey && isRecord(source[matchedKey])) {
+      return source[matchedKey];
+    }
+  }
+  return undefined;
+};
 
 const readValue = (source: GatewayRawPayload, keys: string[]) => {
   for (const key of keys) {
@@ -138,7 +169,7 @@ const readBoolean = (source: GatewayRawPayload, keys: string[]) => {
   return undefined;
 };
 
-const normalizeFloor = (value: unknown): FloorId => {
+const normalizeFloor = (value: unknown, fallback: FloorId = '4F'): FloorId => {
   const normalized = String(value ?? '4F').trim().toUpperCase();
   if (['1F', '1', 'F1', '1층'].includes(normalized)) {
     return '1F';
@@ -152,18 +183,19 @@ const normalizeFloor = (value: unknown): FloorId => {
   if (['4F', '4', 'F4', '4층'].includes(normalized)) {
     return '4F';
   }
-  return '4F';
+  return fallback;
 };
 
-const normalizeStatus = (raw: GatewayRawPayload, isHooked: boolean): WorkerStatus => {
+const normalizeStatus = (raw: GatewayRawPayload, isHooked: boolean, zoneEntered = false): WorkerStatus => {
   const value = String(readValue(raw, ['status', 'state', 'event']) ?? '').trim().toUpperCase();
-  const fallDetected = readBoolean(raw, ['fall_detected', 'fallDetected', 'is_fall', 'airbag_deployed']);
-  const zoneEntered = readBoolean(raw, ['zone_entered', 'zoneEntered', 'hook_zone_required', 'danger_zone']);
+  const fallDetected = readBoolean(raw, ['fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall', 'airbag_deployed']);
+  const dangerZoneEntered =
+    readBoolean(raw, ['zone_entered', 'zoneEntered', 'hook_zone_required', 'danger_zone']) ?? zoneEntered;
 
   if (fallDetected || ['EMERGENCY', 'FALL', 'FALL_DETECTED', 'CRASH'].includes(value)) {
     return 'EMERGENCY';
   }
-  if (!isHooked && (zoneEntered || ['WARNING', 'WARN', 'DANGER', 'UNHOOKED'].includes(value))) {
+  if (!isHooked && (dangerZoneEntered || ['WARNING', 'WARN', 'DANGER', 'UNHOOKED'].includes(value))) {
     return 'WARNING';
   }
   if (['WARNING', 'WARN', 'DANGER'].includes(value)) {
@@ -224,16 +256,82 @@ const normalizeCartridgeState = (value: unknown, status: WorkerStatus): AirbagCa
 
 const normalizeLedMode = (value: unknown): LedMode | undefined => {
   const normalized = String(value ?? '').trim().toUpperCase();
-  if (['FLASH', 'BLINK', 'BLINKING', '점멸'].includes(normalized)) {
+  if (['FLASH', 'BLINK', 'BLINKING', 'RED_BLINK', 'RED_BLINKING', 'LED_BLINK', '점멸'].includes(normalized)) {
     return 'FLASH';
   }
-  if (['STEADY', 'ON', 'SOLID', '점등'].includes(normalized)) {
+  if (['STEADY', 'ON', 'SOLID', 'LED_ON', '점등'].includes(normalized)) {
     return 'STEADY';
   }
-  if (['OFF', '꺼짐'].includes(normalized)) {
+  if (['OFF', 'LED_OFF', '꺼짐'].includes(normalized)) {
     return 'OFF';
   }
   return undefined;
+};
+
+const findBeaconAnchor = (id: string) =>
+  beaconCalibrationAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase());
+
+const readDetectedBeacons = (raw: GatewayRawPayload): DetectedBeacon[] => {
+  const positionData = readAnyRecord(raw, ['position_data', 'positionData', 'position']) ?? raw;
+  const value = readValue(positionData, ['detected_beacons', 'detectedBeacons', 'beacons', 'beacon_list']);
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!isRecord(item)) {
+        return undefined;
+      }
+
+      const id = readString(item, ['id', 'beacon_id', 'beaconId', 'uuid', 'name']);
+      const rssi = readNumber(item, ['rssi', 'rssi_dbm', 'rssiDbm']);
+      return id && rssi !== undefined ? { id, rssi } : undefined;
+    })
+    .filter((item): item is DetectedBeacon => Boolean(item));
+};
+
+const strongestBeacon = (beacons: DetectedBeacon[]) =>
+  [...beacons].sort((a, b) => b.rssi - a.rssi)[0];
+
+const inferFloorFromBeacons = (beacons: DetectedBeacon[]) => {
+  const strongest = strongestBeacon(beacons);
+  if (!strongest) {
+    return undefined;
+  }
+
+  return findBeaconAnchor(strongest.id)?.floor;
+};
+
+const estimateCoordsFromBeacons = (floor: FloorId, beacons: DetectedBeacon[]): Coordinate | undefined => {
+  const samples = beacons
+    .map((beacon) => ({
+      beacon,
+      anchor: findBeaconAnchor(beacon.id),
+    }))
+    .filter((sample): sample is { beacon: DetectedBeacon; anchor: NonNullable<ReturnType<typeof findBeaconAnchor>> } =>
+      Boolean(sample.anchor && sample.anchor.floor === floor),
+    );
+
+  if (!samples.length) {
+    return undefined;
+  }
+
+  const weighted = samples.map((sample) => ({
+    anchor: sample.anchor,
+    weight: Math.max(0.0001, 10 ** (sample.beacon.rssi / 20)),
+  }));
+  const totalWeight = weighted.reduce((sum, sample) => sum + sample.weight, 0);
+
+  return {
+    x: Number((weighted.reduce((sum, sample) => sum + sample.anchor.x * sample.weight, 0) / totalWeight).toFixed(1)),
+    y: Number((weighted.reduce((sum, sample) => sum + sample.anchor.y * sample.weight, 0) / totalWeight).toFixed(1)),
+  };
+};
+
+const isBeaconDangerZoneEntered = (floor: FloorId, beacons: DetectedBeacon[]) => {
+  const strongest = strongestBeacon(beacons);
+  return strongest ? strongest.rssi >= defaultZoneSettings[floor].threshold : false;
 };
 
 const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Partial<WorkerTelemetry> => {
@@ -267,11 +365,22 @@ const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Parti
   ) as Partial<WorkerTelemetry>;
 };
 
-const normalizeCoords = (raw: GatewayRawPayload): Coordinate => {
+const normalizeCoords = (raw: GatewayRawPayload, floor: FloorId, beacons: DetectedBeacon[]): Coordinate => {
   const coords = readRecord(raw, 'coords') ?? readRecord(raw, 'coord') ?? readRecord(raw, 'position') ?? raw;
+  const x = readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x', 'coords.x']);
+  const y = readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y', 'coords.y']);
+  if (x !== undefined && y !== undefined) {
+    return { x, y };
+  }
+
+  const beaconCoords = estimateCoordsFromBeacons(floor, beacons);
+  if (beaconCoords) {
+    return beaconCoords;
+  }
+
   return {
-    x: readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x', 'coords.x']) ?? 100,
-    y: readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y', 'coords.y']) ?? 70,
+    x: 100,
+    y: 70,
   };
 };
 
@@ -280,26 +389,46 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
     return undefined;
   }
 
-  const workerId = readString(raw, ['worker_id', 'workerId', 'id', 'tag_id', 'device_id']);
+  const header = readAnyRecord(raw, ['header']) ?? {};
+  const sensorData = readAnyRecord(raw, ['sensor_data', 'sensorData']) ?? {};
+  const positionData = readAnyRecord(raw, ['position_data', 'positionData']) ?? {};
+  const expandedRaw: GatewayRawPayload = {
+    ...raw,
+    ...header,
+    ...sensorData,
+    ...positionData,
+  };
+  const detectedBeacons = readDetectedBeacons(expandedRaw);
+  const workerId = readString(expandedRaw, ['worker_id', 'workerId', 'id', 'tag_id', 'device_id', 'deviceId']);
   if (!workerId) {
     return undefined;
   }
 
-  const hookValue = readBoolean(raw, ['is_hooked', 'isHooked', 'hooked', 'hook_closed', 'hook_state']);
-  const floor = normalizeFloor(readValue(raw, ['floor', 'level']));
-  const status = normalizeStatus(raw, hookValue ?? true);
+  const explicitFloor = readValue(expandedRaw, ['floor', 'level']);
+  const floor = explicitFloor === undefined ? inferFloorFromBeacons(detectedBeacons) ?? '1F' : normalizeFloor(explicitFloor);
+  const zoneEntered = isBeaconDangerZoneEntered(floor, detectedBeacons);
+  const hookValue = readBoolean(expandedRaw, ['is_hooked', 'isHooked', 'hooked', 'hook_closed', 'hook_state']);
+  const status = normalizeStatus(expandedRaw, hookValue ?? true, zoneEntered);
   const isHooked = hookValue ?? status === 'NORMAL';
+  const strongest = strongestBeacon(detectedBeacons);
+  const telemetry = normalizeTelemetry(expandedRaw, status);
+  const fallDetected = readBoolean(expandedRaw, ['fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall']);
 
   return {
     worker_id: workerId,
-    gateway_id: readString(raw, ['gateway_id', 'gatewayId', 'gateway', 'gw_id']),
+    gateway_id: readString(expandedRaw, ['gateway_id', 'gatewayId', 'gateway', 'gw_id']),
     floor,
     status,
     is_hooked: isHooked,
-    coords: normalizeCoords(raw),
-    timestamp: normalizeTimestamp(readValue(raw, ['timestamp', 'time', 'ts'])),
-    battery: readNumber(raw, ['battery', 'battery_percent', 'battery_pct', 'batteryPercent', 'batteryLevel', 'bat_pct']),
-    telemetry: normalizeTelemetry(raw, status),
+    coords: normalizeCoords(expandedRaw, floor, detectedBeacons),
+    timestamp: normalizeTimestamp(readValue(expandedRaw, ['timestamp', 'time', 'ts'])),
+    battery: readNumber(expandedRaw, ['battery', 'battery_percent', 'battery_pct', 'batteryPercent', 'batteryLevel', 'bat_pct']),
+    telemetry: {
+      ...telemetry,
+      ...(strongest && telemetry.rssiDbm === undefined ? { rssiDbm: strongest.rssi } : {}),
+      ...(fallDetected && telemetry.fallConfidence === undefined ? { fallConfidence: 96 } : {}),
+      ...(fallDetected && telemetry.impactPeakG === undefined ? { impactPeakG: 6.8 } : {}),
+    },
   };
 };
 

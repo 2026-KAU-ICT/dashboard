@@ -1,6 +1,7 @@
 import type {
   AirbagCartridgeState,
   AirbagState,
+  BeaconAnchor,
   EventLog,
   FloorId,
   GatewayZoneSetting,
@@ -232,6 +233,17 @@ export const defaultGatewayZoneSettings: Record<FloorId, GatewayZoneSetting> = {
     ],
   },
 };
+
+export const beaconAnchors: BeaconAnchor[] = [
+  { id: 'ZONE_A_01', floor: '1F', label: 'Zone A 01', x: 48, y: 46 },
+  { id: 'ZONE_A_02', floor: '1F', label: 'Zone A 02', x: 148, y: 48 },
+  { id: 'ZONE_A_03', floor: '1F', label: 'Zone A 03', x: 154, y: 110 },
+  { id: 'ZONE_A_04', floor: '1F', label: 'Zone A 04', x: 54, y: 112 },
+  { id: 'ZONE_B_01', floor: '2F', label: 'Zone B 01', x: 52, y: 44 },
+  { id: 'ZONE_B_02', floor: '2F', label: 'Zone B 02', x: 150, y: 50 },
+  { id: 'ZONE_B_03', floor: '2F', label: 'Zone B 03', x: 148, y: 108 },
+  { id: 'ZONE_B_04', floor: '2F', label: 'Zone B 04', x: 50, y: 106 },
+];
 
 export const mapZones: MapZone[] = [
   {

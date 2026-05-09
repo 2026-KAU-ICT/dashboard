@@ -108,6 +108,12 @@ export type GatewayZoneSetting = {
   anchors: GatewayAnchor[];
 };
 
+export type BeaconAnchor = Coordinate & {
+  id: string;
+  floor: FloorId;
+  label: string;
+};
+
 export type MapZone = {
   floor: FloorId;
   left: number;

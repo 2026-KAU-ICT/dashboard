@@ -188,8 +188,8 @@ function App() {
       const timer = window.setInterval(() => {
         tick += 1;
         const base = initialWorkers[tick % initialWorkers.length];
-        const emergencyCycle = tick % 18 === 0;
-        const warningCycle = tick % 5 === 0 || !base.is_hooked;
+        const emergencyCycle = tick % 48 === 0;
+        const warningCycle = tick % 10 === 0 || !base.is_hooked;
         const status: WorkerStatus = emergencyCycle ? 'EMERGENCY' : warningCycle ? 'WARNING' : 'NORMAL';
         const nextHooked = status === 'NORMAL';
         const driftX = Math.sin(tick * 0.8 + base.coords.x) * 14;
@@ -216,7 +216,7 @@ function App() {
             rssiDbm: -55 - (tick % 7) * 3 - (status === 'EMERGENCY' ? 8 : 0),
           }),
         }, unhookedDanger ? '세이프티 훅 존 미체결 진입' : undefined);
-      }, 1400);
+      }, 500);
 
       return () => window.clearInterval(timer);
     }
@@ -408,9 +408,62 @@ function App() {
     return { total, unhooked, emergency, warning, predicted, lowBattery, cartridgeReplace, latency };
   }, [workers]);
 
+  const createGatewayCommandPayload = (command: DownlinkCommand) => {
+    switch (command.command) {
+      case 'ACTIVATE_ALARM':
+        return {
+          type: 'CONTROL',
+          command: 'ACTIVATE_ALARM',
+          target_worker_id: command.target_id,
+          target_id: command.target_id,
+        };
+      case 'SET_LED_MODE': {
+        const hardwareCommand = command.mode === 'OFF' ? 'LED_OFF' : command.mode === 'STEADY' ? 'LED_ON' : 'LED_BLINK';
+        return {
+          type: 'CONTROL',
+          command: hardwareCommand,
+          target_worker_id: command.target_id,
+          target_id: command.target_id,
+          mode: command.mode,
+        };
+      }
+      case 'BROADCAST_EVACUATION':
+        return {
+          type: 'CONTROL',
+          command: 'EVACUATION_ALERT',
+          scope: command.floor === 'ALL' ? 'ALL' : 'FLOOR',
+          floor: command.floor,
+          reason: command.reason,
+        };
+      case 'RESET_AIRBAG_CARTRIDGE':
+        return {
+          type: 'CONTROL',
+          command: 'RESET_AIRBAG_CARTRIDGE',
+          target_worker_id: command.target_id,
+          target_id: command.target_id,
+        };
+      case 'UPDATE_ZONE':
+        return {
+          type: 'CONFIG',
+          command: 'UPDATE_ZONE',
+          floor: command.floor,
+          threshold_rssi: command.threshold_rssi,
+          danger_radius_m: command.danger_radius_m,
+          zone_center: command.zone_center,
+        };
+      case 'UPDATE_GATEWAY_ZONE':
+        return {
+          type: 'CONFIG',
+          command: 'UPDATE_GATEWAY_ZONE',
+          floor: command.floor,
+          anchors: command.anchors,
+        };
+    }
+  };
+
   const sendCommand = useCallback(
     (command: DownlinkCommand) => {
-      const commandText = JSON.stringify(command);
+      const commandText = JSON.stringify(createGatewayCommandPayload(command));
       const openSockets = socketsRef.current.filter((socket) => socket.readyState === WebSocket.OPEN);
       if (connectionState === 'live' && openSockets.length > 0) {
         openSockets.forEach((socket) => socket.send(commandText));
