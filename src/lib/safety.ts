@@ -140,11 +140,17 @@ const readBoolean = (source: GatewayRawPayload, keys: string[]) => {
 
 const normalizeFloor = (value: unknown): FloorId => {
   const normalized = String(value ?? '4F').trim().toUpperCase();
+  if (['1F', '1', 'F1', '1층'].includes(normalized)) {
+    return '1F';
+  }
+  if (['2F', '2', 'F2', '2층'].includes(normalized)) {
+    return '2F';
+  }
   if (['3F', '3', 'F3', '3층'].includes(normalized)) {
     return '3F';
   }
-  if (['ROOF', 'RF', 'R', '옥상'].includes(normalized)) {
-    return 'ROOF';
+  if (['4F', '4', 'F4', '4층'].includes(normalized)) {
+    return '4F';
   }
   return '4F';
 };

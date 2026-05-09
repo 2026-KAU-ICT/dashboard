@@ -14,7 +14,7 @@ import {
 import type { Coordinate, FloorFilter, FloorId, GatewayZoneSetting, Worker, ZoneSetting } from '../types';
 import { StatusBadge } from './ui';
 
-const floorTabs: FloorId[] = ['3F', '4F', 'ROOF'];
+const floorTabs: FloorId[] = ['1F', '2F', '3F', '4F'];
 const satelliteMapUrl = String(import.meta.env.VITE_SITE_SATELLITE_MAP_URL ?? '').trim();
 
 export function SiteMap({
@@ -46,7 +46,7 @@ export function SiteMap({
   const [dragFloor, setDragFloor] = useState<FloorId | null>(null);
   const [dragGatewayAnchor, setDragGatewayAnchor] = useState<{ floor: FloorId; anchorId: string } | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
-  const activeFloor: FloorId = selectedFloor === 'ALL' ? '3F' : selectedFloor;
+  const activeFloor: FloorId = selectedFloor === 'ALL' ? '1F' : selectedFloor;
   const mapSource = satelliteMapUrl || campusMap;
   const activeZone = getMapZone(activeFloor);
   const visibleWorkers = workers.filter((worker) => worker.floor === activeFloor);
@@ -108,7 +108,7 @@ export function SiteMap({
           <p className="mt-1 text-sm text-stone-400">층별 독립 좌표계 · 조끼 BLE → 가까운 게이트웨이 → WebSocket 웹</p>
         </div>
 
-        <div className="grid grid-cols-3 border border-white/10 bg-black/20 text-xs font-semibold sm:text-sm">
+        <div className="grid grid-cols-4 border border-white/10 bg-black/20 text-xs font-semibold sm:text-sm">
           {floorTabs.map((floor) => (
             <button
               key={floor}

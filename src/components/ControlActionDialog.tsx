@@ -1,10 +1,10 @@
-import { CheckCircle2, Cpu, Megaphone, UsersRound } from 'lucide-react';
+import { CheckCircle2, Cpu, Megaphone, UsersRound, Volume2 } from 'lucide-react';
 import { floorLabels } from '../config/dashboard';
 import { formatTime } from '../lib/base';
 import type { FloorId } from '../types';
 import { InfoTile } from './ui';
 
-export type ControlActionKind = 'FLOOR_WARNING' | 'SITE_EVACUATION' | 'CARTRIDGE_RESET';
+export type ControlActionKind = 'VEST_ALARM' | 'FLOOR_WARNING' | 'SITE_EVACUATION' | 'CARTRIDGE_RESET';
 
 export type ControlActionResult = {
   action: ControlActionKind;
@@ -25,6 +25,12 @@ const actionCopy: Record<
     actionLabel: string;
   }
 > = {
+  VEST_ALARM: {
+    title: '원격 사이렌 작동 명령 전송 완료',
+    description: '선택한 작업자의 조끼로 부저와 LED 강제 작동 명령을 전송했습니다.',
+    icon: Volume2,
+    actionLabel: '개별 조끼 사이렌',
+  },
   FLOOR_WARNING: {
     title: '같은 층 작업자 동시 경고 전송 완료',
     description: '선택 작업자와 같은 층에 있는 조끼로 부저와 LED 경고 명령을 브로드캐스트했습니다.',
@@ -55,13 +61,15 @@ export function ControlActionDialog({
   const copy = actionCopy[result.action];
   const Icon = copy.icon;
   const target =
-    result.action === 'CARTRIDGE_RESET' && result.workerName && result.workerId
+    result.workerName && result.workerId
       ? `${result.workerName} (${result.workerId})`
       : result.floor === 'ALL'
         ? '전체 현장'
         : floorLabels[result.floor];
   const scope =
-    result.floor === 'ALL'
+    result.action === 'VEST_ALARM' || result.action === 'CARTRIDGE_RESET'
+      ? '개별 조끼 1명'
+      : result.floor === 'ALL'
       ? `전체 작업자 ${result.affectedCount}명`
       : `${floorLabels[result.floor]} 작업자 ${result.affectedCount}명`;
 

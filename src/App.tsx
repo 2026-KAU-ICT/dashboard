@@ -61,8 +61,8 @@ import {
 
 function App() {
   const queryClient = useQueryClient();
-  const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('3F');
-  const [selectedWorkerId, setSelectedWorkerId] = useState('A002');
+  const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('1F');
+  const [selectedWorkerId, setSelectedWorkerId] = useState('A006');
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [zoneSettings, setZoneSettings] = useState(defaultZoneSettings);
   const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
@@ -490,9 +490,19 @@ function App() {
       return;
     }
 
+    const worker = selectedWorker;
     sendCommand({
       command: 'ACTIVATE_ALARM',
-      target_id: selectedWorker.worker_id,
+      target_id: worker.worker_id,
+    });
+    setControlActionResult({
+      action: 'VEST_ALARM',
+      floor: worker.floor,
+      workerId: worker.worker_id,
+      workerName: worker.name,
+      gateway: worker.gateway,
+      affectedCount: 1,
+      timestamp: new Date().toISOString(),
     });
   };
 
