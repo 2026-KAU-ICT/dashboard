@@ -215,7 +215,7 @@ function App() {
             latencyMs: status === 'EMERGENCY' ? 142 : 118 + (tick % 6) * 9,
             rssiDbm: -55 - (tick % 7) * 3 - (status === 'EMERGENCY' ? 8 : 0),
           }),
-        }, unhookedDanger ? '세이프티 훅 존 미체결 진입' : undefined);
+        }, unhookedDanger ? 'A-Hook 존 미체결 진입' : undefined);
       }, 500);
 
       return () => window.clearInterval(timer);
@@ -490,7 +490,7 @@ function App() {
           case 'RESET_AIRBAG_CARTRIDGE':
             return `${workerName} 에어백 카트리지 교체 완료`;
           case 'UPDATE_ZONE':
-            return `${floorLabels[command.floor]} 안전 훅 존 갱신`;
+            return `${floorLabels[command.floor]} A-Hook 존 갱신`;
           case 'UPDATE_GATEWAY_ZONE':
             return `${floorLabels[command.floor]} 게이트웨이 존 갱신`;
         }

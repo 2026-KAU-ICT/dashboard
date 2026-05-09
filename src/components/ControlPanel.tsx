@@ -144,7 +144,7 @@ export function ControlPanel({
         <div className="mt-5 space-y-4">
           <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
             <SlidersHorizontal className="h-4 w-4 text-emerald-300" />
-            세이프티 훅 존
+            A-Hook 존
           </div>
 
           {(Object.keys(zoneSettings) as FloorId[]).map((floor) => {
