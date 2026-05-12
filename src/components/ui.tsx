@@ -1,7 +1,6 @@
 import { CheckCircle2, Siren, TriangleAlert } from 'lucide-react';
 import { statusMeta } from '../config/dashboard';
 import type { WorkerStatus } from '../types';
-import { clamp } from '../lib/base';
 
 export function MetricCard({
   icon,
@@ -73,44 +72,5 @@ export function StatusBadge({ status }: { status: WorkerStatus }) {
       <Icon className={`h-3.5 w-3.5 ${status === 'EMERGENCY' ? 'animate-softBlink' : ''}`} />
       {meta.label}
     </span>
-  );
-}
-
-export function MiniSparkline({
-  title,
-  values,
-  min,
-  max,
-  tone,
-  unit,
-}: {
-  title: string;
-  values: number[];
-  min: number;
-  max: number;
-  tone: 'emerald' | 'cyan' | 'red';
-  unit: string;
-}) {
-  const stroke = tone === 'red' ? '#f87171' : tone === 'cyan' ? '#67e8f9' : '#6ee7b7';
-  const points = values.map((value, index) => {
-    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100;
-    const y = 34 - ((clamp(value, min, max) - min) / (max - min)) * 28;
-    return `${x},${y}`;
-  });
-  const latest = values[values.length - 1] ?? 0;
-
-  return (
-    <div className="border border-white/10 bg-black/25 p-3">
-      <div className="flex items-center justify-between text-xs font-bold">
-        <span className="text-stone-400">{title}</span>
-        <span className={tone === 'red' ? 'text-red-200' : tone === 'cyan' ? 'text-cyan-100' : 'text-emerald-100'}>
-          {Math.round(latest)} {unit}
-        </span>
-      </div>
-      <svg viewBox="0 0 100 38" className="mt-2 h-12 w-full" preserveAspectRatio="none" role="img" aria-label={`${title} trend`}>
-        <path d="M0 34 H100" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
-        <polyline points={points.join(' ')} fill="none" stroke={stroke} strokeWidth="2.6" />
-      </svg>
-    </div>
   );
 }

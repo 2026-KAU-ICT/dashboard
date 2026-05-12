@@ -16,7 +16,6 @@ export const createTelemetry = (
   overrides: Partial<WorkerTelemetry> = {},
 ): WorkerTelemetry => ({
   accelerationG: status === 'EMERGENCY' ? 3.8 : status === 'WARNING' ? 1.7 : 0.9,
-  impactPeakG: status === 'EMERGENCY' ? 6.8 : status === 'WARNING' ? 2.3 : 1.1,
   fallConfidence: status === 'EMERGENCY' ? 96 : status === 'WARNING' ? 54 : 12,
   latencyMs: status === 'EMERGENCY' ? 148 : status === 'WARNING' ? 176 : 122,
   rssiDbm: status === 'EMERGENCY' ? -73 : status === 'WARNING' ? -66 : -58,

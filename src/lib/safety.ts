@@ -10,6 +10,7 @@ import {
 import type {
   AirbagCartridgeState,
   AirbagState,
+  BeaconSignal,
   Coordinate,
   EventLog,
   FloorId,
@@ -23,17 +24,12 @@ import type {
 } from '../types';
 import { clamp, createTelemetry, createTrace } from './base';
 
-type DetectedBeacon = {
-  id: string;
-  rssi: number;
-};
-
 export const calculateWorkerRisk = (worker: Worker) => {
   const statusScore = worker.status === 'EMERGENCY' ? 100 : worker.status === 'WARNING' ? 62 : 16;
   const hookScore = worker.is_hooked ? 0 : 22;
   const fallScore = worker.telemetry.fallConfidence * 0.45;
-  const impactScore = Math.min(worker.telemetry.impactPeakG * 5, 28);
-  return Math.round(clamp(statusScore + hookScore + fallScore + impactScore, 0, 100));
+  const batteryScore = worker.battery <= 25 ? 12 : 0;
+  return Math.round(clamp(statusScore + hookScore + fallScore + batteryScore, 0, 100));
 };
 
 export const getMapZone = (floor: FloorId) => mapZones.find((item) => item.floor === floor) ?? mapZones[0];
@@ -187,8 +183,18 @@ const normalizeFloor = (value: unknown, fallback: FloorId = '4F'): FloorId => {
 };
 
 const normalizeStatus = (raw: GatewayRawPayload, isHooked: boolean, zoneEntered = false): WorkerStatus => {
-  const value = String(readValue(raw, ['status', 'state', 'event']) ?? '').trim().toUpperCase();
-  const fallDetected = readBoolean(raw, ['fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall', 'airbag_deployed']);
+  const rawStatus = readValue(raw, ['status', 'state', 'event']);
+  const value = typeof rawStatus === 'string' || typeof rawStatus === 'number' ? String(rawStatus).trim().toUpperCase() : '';
+  const fallDetected = readBoolean(raw, [
+    'has_fallen',
+    'hasFallen',
+    'fall_status',
+    'fallStatus',
+    'fall_detected',
+    'fallDetected',
+    'is_fall',
+    'airbag_deployed',
+  ]);
   const dangerZoneEntered =
     readBoolean(raw, ['zone_entered', 'zoneEntered', 'hook_zone_required', 'danger_zone']) ?? zoneEntered;
 
@@ -268,33 +274,54 @@ const normalizeLedMode = (value: unknown): LedMode | undefined => {
   return undefined;
 };
 
-const findBeaconAnchor = (id: string) =>
+const findBeaconAnchor = (id: string, floor?: FloorId) =>
+  beaconCalibrationAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase() && (!floor || anchor.floor === floor)) ??
   beaconCalibrationAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase());
 
-const readDetectedBeacons = (raw: GatewayRawPayload): DetectedBeacon[] => {
+const readDetectedBeacons = (raw: GatewayRawPayload): BeaconSignal[] => {
   const positionData = readAnyRecord(raw, ['position_data', 'positionData', 'position']) ?? raw;
   const value = readValue(positionData, ['detected_beacons', 'detectedBeacons', 'beacons', 'beacon_list']);
-  if (!Array.isArray(value)) {
-    return [];
+
+  const normalizeBeacon = (item: unknown, fallbackId?: string): BeaconSignal | undefined => {
+    if (!isRecord(item)) {
+      return undefined;
+    }
+
+    const id = readString(item, ['id', 'beacon_id', 'beaconId', 'uuid', 'name']) ?? fallbackId;
+    const rssi = readNumber(item, ['rssi', 'rssi_dbm', 'rssiDbm']);
+    const dist = readNumber(item, ['dist', 'distance', 'distance_m', 'distanceM']);
+    const coords = readRecord(item, 'coords') ?? readRecord(item, 'coord') ?? item;
+    const x = readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x']);
+    const y = readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y']);
+    return id && rssi !== undefined
+      ? { id, rssi, ...(dist !== undefined ? { dist } : {}), ...(x !== undefined && y !== undefined ? { x, y } : {}) }
+      : undefined;
+  };
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeBeacon(item))
+      .filter((item): item is BeaconSignal => Boolean(item));
   }
 
-  return value
-    .map((item) => {
-      if (!isRecord(item)) {
-        return undefined;
-      }
+  if (isRecord(value)) {
+    const singleBeacon = normalizeBeacon(value);
+    if (singleBeacon) {
+      return [singleBeacon];
+    }
 
-      const id = readString(item, ['id', 'beacon_id', 'beaconId', 'uuid', 'name']);
-      const rssi = readNumber(item, ['rssi', 'rssi_dbm', 'rssiDbm']);
-      return id && rssi !== undefined ? { id, rssi } : undefined;
-    })
-    .filter((item): item is DetectedBeacon => Boolean(item));
+    return Object.entries(value)
+      .map(([id, item]) => normalizeBeacon(item, id))
+      .filter((item): item is BeaconSignal => Boolean(item));
+  }
+
+  return [];
 };
 
-const strongestBeacon = (beacons: DetectedBeacon[]) =>
+const strongestBeacon = (beacons: BeaconSignal[]) =>
   [...beacons].sort((a, b) => b.rssi - a.rssi)[0];
 
-const inferFloorFromBeacons = (beacons: DetectedBeacon[]) => {
+const inferFloorFromBeacons = (beacons: BeaconSignal[]) => {
   const strongest = strongestBeacon(beacons);
   if (!strongest) {
     return undefined;
@@ -303,23 +330,117 @@ const inferFloorFromBeacons = (beacons: DetectedBeacon[]) => {
   return findBeaconAnchor(strongest.id)?.floor;
 };
 
-const estimateCoordsFromBeacons = (floor: FloorId, beacons: DetectedBeacon[]): Coordinate | undefined => {
+const inferFloorFromGatewayId = (gatewayId?: string): FloorId | undefined => {
+  if (!gatewayId) {
+    return undefined;
+  }
+
+  const normalized = gatewayId.trim().toUpperCase();
+  const matchedGateway = gatewayNodes.find((node) => node.id.toUpperCase() === normalized);
+  if (matchedGateway) {
+    return matchedGateway.floor;
+  }
+
+  const floorMatch = normalized.match(/([1-4])F/);
+  if (floorMatch) {
+    return normalizeFloor(floorMatch[1]);
+  }
+
+  const numericId = Number(normalized);
+  if (!Number.isFinite(numericId)) {
+    return undefined;
+  }
+
+  if (numericId >= 1 && numericId <= 4) {
+    return normalizeFloor(numericId);
+  }
+
+  const hundreds = Math.floor(numericId / 100);
+  return hundreds >= 1 && hundreds <= 4 ? normalizeFloor(hundreds) : undefined;
+};
+
+type BeaconSample = {
+  beacon: BeaconSignal;
+  anchor: NonNullable<ReturnType<typeof findBeaconAnchor>>;
+};
+
+const sourceToMeters = (floor: FloorId, coords: Coordinate): Coordinate => {
+  const zone = getMapZone(floor);
+  return {
+    x: (coords.x / zone.sourceWidth) * zone.metersWidth,
+    y: (coords.y / zone.sourceHeight) * zone.metersHeight,
+  };
+};
+
+const metersToSource = (floor: FloorId, coords: Coordinate): Coordinate => {
+  const zone = getMapZone(floor);
+  return {
+    x: Number(clamp((coords.x / zone.metersWidth) * zone.sourceWidth, 0, zone.sourceWidth).toFixed(1)),
+    y: Number(clamp((coords.y / zone.metersHeight) * zone.sourceHeight, 0, zone.sourceHeight).toFixed(1)),
+  };
+};
+
+const trilaterateFromDistances = (floor: FloorId, samples: BeaconSample[]): Coordinate | undefined => {
+  const rangedSamples = samples
+    .filter((sample) => sample.beacon.dist !== undefined && sample.beacon.dist > 0)
+    .sort((a, b) => (a.beacon.dist ?? Number.POSITIVE_INFINITY) - (b.beacon.dist ?? Number.POSITIVE_INFINITY));
+  if (rangedSamples.length < 3) {
+    return undefined;
+  }
+
+  const [reference, ...others] = rangedSamples;
+  const refPoint = sourceToMeters(floor, reference.anchor);
+  const refDistance = reference.beacon.dist ?? 0;
+  const equations = others.map((sample) => {
+    const point = sourceToMeters(floor, sample.anchor);
+    const distance = sample.beacon.dist ?? 0;
+    return {
+      a: 2 * (point.x - refPoint.x),
+      b: 2 * (point.y - refPoint.y),
+      c: refDistance ** 2 - distance ** 2 - refPoint.x ** 2 + point.x ** 2 - refPoint.y ** 2 + point.y ** 2,
+    };
+  });
+
+  const ata00 = equations.reduce((sum, equation) => sum + equation.a ** 2, 0);
+  const ata01 = equations.reduce((sum, equation) => sum + equation.a * equation.b, 0);
+  const ata11 = equations.reduce((sum, equation) => sum + equation.b ** 2, 0);
+  const atb0 = equations.reduce((sum, equation) => sum + equation.a * equation.c, 0);
+  const atb1 = equations.reduce((sum, equation) => sum + equation.b * equation.c, 0);
+  const determinant = ata00 * ata11 - ata01 ** 2;
+
+  if (Math.abs(determinant) < 0.0001) {
+    return undefined;
+  }
+
+  return metersToSource(floor, {
+    x: (atb0 * ata11 - ata01 * atb1) / determinant,
+    y: (ata00 * atb1 - ata01 * atb0) / determinant,
+  });
+};
+
+const estimateCoordsFromBeacons = (floor: FloorId, beacons: BeaconSignal[]): Coordinate | undefined => {
   const samples = beacons
     .map((beacon) => ({
       beacon,
-      anchor: findBeaconAnchor(beacon.id),
+      anchor: findBeaconAnchor(beacon.id, floor),
     }))
-    .filter((sample): sample is { beacon: DetectedBeacon; anchor: NonNullable<ReturnType<typeof findBeaconAnchor>> } =>
-      Boolean(sample.anchor && sample.anchor.floor === floor),
-    );
+    .filter((sample): sample is BeaconSample => Boolean(sample.anchor && sample.anchor.floor === floor));
 
   if (!samples.length) {
     return undefined;
   }
 
+  const trilateratedCoords = trilaterateFromDistances(floor, samples);
+  if (trilateratedCoords) {
+    return trilateratedCoords;
+  }
+
   const weighted = samples.map((sample) => ({
     anchor: sample.anchor,
-    weight: Math.max(0.0001, 10 ** (sample.beacon.rssi / 20)),
+    weight:
+      sample.beacon.dist !== undefined && sample.beacon.dist > 0
+        ? 1 / (sample.beacon.dist + 0.2) ** 2
+        : Math.max(0.0001, 10 ** (sample.beacon.rssi / 20)),
   }));
   const totalWeight = weighted.reduce((sum, sample) => sum + sample.weight, 0);
 
@@ -329,7 +450,7 @@ const estimateCoordsFromBeacons = (floor: FloorId, beacons: DetectedBeacon[]): C
   };
 };
 
-const isBeaconDangerZoneEntered = (floor: FloorId, beacons: DetectedBeacon[]) => {
+const isBeaconDangerZoneEntered = (floor: FloorId, beacons: BeaconSignal[]) => {
   const strongest = strongestBeacon(beacons);
   return strongest ? strongest.rssi >= defaultZoneSettings[floor].threshold : false;
 };
@@ -351,7 +472,6 @@ const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Parti
 
   const overrides: Partial<WorkerTelemetry> = {
     accelerationG: readNumber(telemetry, ['accelerationG', 'acceleration_g', 'accel_g', 'imu_g', 'acc_g']),
-    impactPeakG: readNumber(telemetry, ['impactPeakG', 'impact_peak_g', 'impact_g', 'shock_g']),
     fallConfidence: readNumber(telemetry, ['fallConfidence', 'fall_confidence', 'fall_probability', 'confidence']),
     latencyMs: readNumber(telemetry, ['latencyMs', 'latency_ms', 'edge_latency_ms', 'decision_latency_ms']),
     rssiDbm: readNumber(telemetry, ['rssiDbm', 'rssi_dbm', 'rssi']),
@@ -365,7 +485,7 @@ const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Parti
   ) as Partial<WorkerTelemetry>;
 };
 
-const normalizeCoords = (raw: GatewayRawPayload, floor: FloorId, beacons: DetectedBeacon[]): Coordinate => {
+const normalizeCoords = (raw: GatewayRawPayload, floor: FloorId, beacons: BeaconSignal[]): Coordinate => {
   const coords = readRecord(raw, 'coords') ?? readRecord(raw, 'coord') ?? readRecord(raw, 'position') ?? raw;
   const x = readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x', 'coords.x']);
   const y = readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y', 'coords.y']);
@@ -392,42 +512,50 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
   const header = readAnyRecord(raw, ['header']) ?? {};
   const sensorData = readAnyRecord(raw, ['sensor_data', 'sensorData']) ?? {};
   const positionData = readAnyRecord(raw, ['position_data', 'positionData']) ?? {};
+  const statusData = readAnyRecord(raw, ['status']) ?? {};
   const expandedRaw: GatewayRawPayload = {
     ...raw,
     ...header,
     ...sensorData,
     ...positionData,
+    ...statusData,
   };
   const detectedBeacons = readDetectedBeacons(expandedRaw);
-  const workerId = readString(expandedRaw, ['worker_id', 'workerId', 'id', 'tag_id', 'device_id', 'deviceId']);
+  const gatewayId = readString(expandedRaw, ['gateway_id', 'gatewayId', 'gateway', 'gw_id']);
+  const workerId =
+    readString(expandedRaw, ['worker_id', 'workerId', 'vest_id', 'vestId', 'tag_id', 'device_id', 'deviceId']) ??
+    (gatewayId ? `W-${gatewayId}` : undefined);
   if (!workerId) {
     return undefined;
   }
 
   const explicitFloor = readValue(expandedRaw, ['floor', 'level']);
-  const floor = explicitFloor === undefined ? inferFloorFromBeacons(detectedBeacons) ?? '1F' : normalizeFloor(explicitFloor);
+  const floor =
+    explicitFloor === undefined
+      ? inferFloorFromGatewayId(gatewayId) ?? inferFloorFromBeacons(detectedBeacons) ?? '1F'
+      : normalizeFloor(explicitFloor);
   const zoneEntered = isBeaconDangerZoneEntered(floor, detectedBeacons);
   const hookValue = readBoolean(expandedRaw, ['is_hooked', 'isHooked', 'hooked', 'hook_closed', 'hook_state']);
   const status = normalizeStatus(expandedRaw, hookValue ?? true, zoneEntered);
   const isHooked = hookValue ?? status === 'NORMAL';
   const strongest = strongestBeacon(detectedBeacons);
   const telemetry = normalizeTelemetry(expandedRaw, status);
-  const fallDetected = readBoolean(expandedRaw, ['fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall']);
+  const fallDetected = readBoolean(expandedRaw, ['has_fallen', 'hasFallen', 'fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall']);
 
   return {
     worker_id: workerId,
-    gateway_id: readString(expandedRaw, ['gateway_id', 'gatewayId', 'gateway', 'gw_id']),
+    gateway_id: gatewayId,
     floor,
     status,
     is_hooked: isHooked,
     coords: normalizeCoords(expandedRaw, floor, detectedBeacons),
     timestamp: normalizeTimestamp(readValue(expandedRaw, ['timestamp', 'time', 'ts'])),
     battery: readNumber(expandedRaw, ['battery', 'battery_percent', 'battery_pct', 'batteryPercent', 'batteryLevel', 'bat_pct']),
+    beacons: detectedBeacons,
     telemetry: {
       ...telemetry,
       ...(strongest && telemetry.rssiDbm === undefined ? { rssiDbm: strongest.rssi } : {}),
       ...(fallDetected && telemetry.fallConfidence === undefined ? { fallConfidence: 96 } : {}),
-      ...(fallDetected && telemetry.impactPeakG === undefined ? { impactPeakG: 6.8 } : {}),
     },
   };
 };
@@ -506,7 +634,7 @@ export const normalizeGatewayPayload = (payload: GatewayPayload): Worker => {
     telemetry: createTelemetry(payload.status, payload.telemetry),
     trace: createTrace(payload.coords, payload.timestamp),
     batteryHistory: [payload.battery ?? profile.battery],
-    rssiHistory: [payload.telemetry?.rssiDbm ?? createTelemetry(payload.status).rssiDbm],
+    rssiHistory: [payload.telemetry?.rssiDbm ?? payload.beacons?.[0]?.rssi ?? createTelemetry(payload.status).rssiDbm],
   };
 };
 

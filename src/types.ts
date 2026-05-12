@@ -15,9 +15,16 @@ export type PositionSample = Coordinate & {
   timestamp: string;
 };
 
+export type BeaconSignal = {
+  id: string;
+  dist?: number;
+  rssi: number;
+  x?: number;
+  y?: number;
+};
+
 export type WorkerTelemetry = {
   accelerationG: number;
-  impactPeakG: number;
   fallConfidence: number;
   latencyMs: number;
   rssiDbm: number;
@@ -35,6 +42,7 @@ export type GatewayPayload = {
   coords: Coordinate;
   timestamp: string;
   battery?: number;
+  beacons?: BeaconSignal[];
   telemetry?: Partial<WorkerTelemetry>;
 };
 

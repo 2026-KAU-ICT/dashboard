@@ -159,11 +159,11 @@ export function SiteMap({
           >
             <div className="absolute left-2 top-2 inline-flex items-center gap-1.5 border border-white/10 bg-black/60 px-1.5 py-1 text-[10px] font-black text-stone-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
               <RadioTower className="h-3.5 w-3.5" />
-              {floorLabels[activeFloor]} Gateway Layer
+              {floorLabels[activeFloor]} Beacon Layer
             </div>
             <div className="absolute left-2 top-10 inline-flex items-center gap-1.5 border border-cyan-200/20 bg-black/60 px-1.5 py-1 text-[10px] font-black text-cyan-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
               <Waypoints className="h-3.5 w-3.5" />
-              Gateway Zone {isGatewayZoneEditable ? 'Edit' : 'Lock'}
+              Beacon Zone Auto
             </div>
             <div className="absolute right-2 top-2 inline-flex items-center gap-1.5 border border-white/10 bg-black/60 px-1.5 py-1 text-[10px] font-black text-stone-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
               <Layers3 className="h-3.5 w-3.5" />
@@ -193,7 +193,7 @@ export function SiteMap({
                   left: `${point.left}%`,
                   top: `${point.top}%`,
                 }}
-                title={`${floorLabels[activeFloor]} ${anchor.label} 기준점`}
+                title={`${floorLabels[activeFloor]} ${anchor.label} 비콘 기준점`}
                 onPointerDown={(event) => {
                   event.stopPropagation();
                   if (isGatewayZoneEditable) {

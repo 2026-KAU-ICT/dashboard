@@ -1,82 +1,137 @@
-import { BrainCircuit, Network, Waves } from 'lucide-react';
-import { airbagLabels, cartridgeLabels, floorLabels, gatewayNodes, statusMeta } from '../config/dashboard';
+import { BrainCircuit, RadioTower } from 'lucide-react';
+import { beaconAnchors, floorLabels, statusMeta } from '../config/dashboard';
 import { clamp } from '../lib/base';
 import { calculateWorkerRisk, isInSafetyHookZone } from '../lib/safety';
-import type { EventLog, FloorId, Worker, ZoneSetting } from '../types';
+import type { BeaconSignal, EventLog, FloorId, Worker, ZoneSetting } from '../types';
 import { NotificationPanel } from './NotificationPanel';
-import { InfoTile, MiniSparkline, PanelHeader } from './ui';
+import { InfoTile, PanelHeader } from './ui';
 
 export function OperationalPanels({
   workers,
   events,
-  selectedWorker,
   zoneSettings,
 }: {
   workers: Worker[];
   events: EventLog[];
-  selectedWorker?: Worker;
   zoneSettings: Record<FloorId, ZoneSetting>;
 }) {
   const rankedWorkers = [...workers].sort((a, b) => calculateWorkerRisk(b) - calculateWorkerRisk(a)).slice(0, 4);
 
   return (
-    <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
-      <GatewayMeshPanel workers={workers} />
+    <section className="grid gap-4 lg:grid-cols-3">
+      <BeaconSignalPanel workers={workers} />
       <RiskPredictionPanel workers={rankedWorkers} zoneSettings={zoneSettings} />
-      <TelemetryPanel worker={selectedWorker} />
       <NotificationPanel events={events} workers={workers} />
     </section>
   );
 }
 
-function GatewayMeshPanel({ workers }: { workers: Worker[] }) {
-  const enrichedNodes = gatewayNodes.map((node) => {
-    const nodeWorkers = workers.filter((worker) => worker.gateway === node.id);
-    const liveRssi = nodeWorkers.length
-      ? Math.round(nodeWorkers.reduce((sum, worker) => sum + worker.telemetry.rssiDbm, 0) / nodeWorkers.length)
-      : node.rssi;
-    const quality = clamp(100 - Math.abs(liveRssi + 45) * 3, 24, 96);
-    const status = liveRssi <= -74 ? '주의' : liveRssi <= -67 ? '보통' : '안정';
+function BeaconSignalPanel({ workers }: { workers: Worker[] }) {
+  const findAnchor = (id: string, floor: FloorId) =>
+    beaconAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase() && anchor.floor === floor) ??
+    beaconAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase());
+  const grouped = new Map<
+    string,
+    {
+      id: string;
+      label: string;
+      floor: FloorId;
+      rssiSum: number;
+      count: number;
+      dist?: number;
+      workerNames: Set<string>;
+    }
+  >();
 
-    return {
-      ...node,
-      liveRssi,
-      quality,
-      status,
-      vestCount: nodeWorkers.length,
-    };
+  workers.forEach((worker) => {
+    worker.beacons?.forEach((beacon: BeaconSignal) => {
+      const anchor = findAnchor(beacon.id, worker.floor);
+      const key = `${worker.floor}-${beacon.id}`;
+      const current = grouped.get(key) ?? {
+        id: beacon.id,
+        label: anchor?.label ?? beacon.id,
+        floor: anchor?.floor ?? worker.floor,
+        rssiSum: 0,
+        count: 0,
+        dist: undefined,
+        workerNames: new Set<string>(),
+      };
+
+      current.rssiSum += beacon.rssi;
+      current.count += 1;
+      current.dist = current.dist === undefined || (beacon.dist !== undefined && beacon.dist < current.dist) ? beacon.dist : current.dist;
+      current.workerNames.add(worker.name);
+      grouped.set(key, current);
+    });
   });
-  const averageRssi = Math.round(enrichedNodes.reduce((sum, node) => sum + node.liveRssi, 0) / enrichedNodes.length);
-  const packetRate = gatewayNodes.reduce((sum, node) => sum + node.packets, 0) + workers.length * 12;
+
+  const liveRows = [...grouped.values()]
+    .map((beacon) => {
+      const rssi = Math.round(beacon.rssiSum / beacon.count);
+      const quality = clamp(((rssi + 100) / 80) * 100, 8, 98);
+      const status = rssi <= -78 ? '약함' : rssi <= -65 ? '보통' : '강함';
+      return {
+        ...beacon,
+        rssi,
+        quality,
+        status,
+      };
+    })
+    .sort((a, b) => b.rssi - a.rssi)
+    .slice(0, 6);
+
+  const rows = liveRows.length
+    ? liveRows
+    : beaconAnchors.slice(0, 4).map((anchor) => ({
+        id: anchor.id,
+        label: anchor.label,
+        floor: anchor.floor,
+        rssi: undefined,
+        quality: 12,
+        status: '수신 대기',
+        dist: undefined,
+        count: 0,
+        workerNames: new Set<string>(),
+      }));
+  const averageRssi = liveRows.length
+    ? `${Math.round(liveRows.reduce((sum, row) => sum + row.rssi, 0) / liveRows.length)} dBm`
+    : '수신 대기';
+  const sampleCount = liveRows.reduce((sum, row) => sum + row.count, 0);
 
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
-      <PanelHeader icon={<Network className="h-5 w-5 text-emerald-300" />} title="게이트웨이 브리지" right={`${averageRssi} dBm`} />
+      <PanelHeader icon={<RadioTower className="h-5 w-5 text-emerald-300" />} title="비콘 신호 강도" right={averageRssi} />
       <div className="space-y-3 p-4">
         <div className="grid grid-cols-2 gap-2">
-          <InfoTile label="Gateway" value={`${gatewayNodes.length} online`} />
-          <InfoTile label="Packet" value={`${packetRate}/min`} />
+          <InfoTile label="Beacon" value={`${rows.length}개`} />
+          <InfoTile label="Sample" value={sampleCount ? `${sampleCount} readings` : '대기'} />
         </div>
         <div className="border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-100">
-          조끼 BLE → 가까운 게이트웨이 → WebSocket 대시보드
+          조끼가 측정한 비콘 RSSI/거리 → 게이트웨이 → WebSocket 대시보드
         </div>
         <div className="space-y-2">
-          {enrichedNodes.map((node) => (
-            <div key={node.id} className="grid grid-cols-[76px_1fr_92px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_110px]">
-              <span className="font-bold text-stone-200">{node.id}</span>
+          {rows.map((beacon) => (
+            <div key={beacon.id} className="grid grid-cols-[76px_1fr_92px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_110px]">
+              <span className="font-bold text-stone-200">{beacon.label}</span>
               <div className="h-2 bg-white/10">
                 <div
                   className={`h-full ${
-                    node.liveRssi <= -74 ? 'bg-red-400' : node.liveRssi <= -67 ? 'bg-amber-300' : 'bg-emerald-300'
+                    beacon.rssi === undefined
+                      ? 'bg-stone-600'
+                      : beacon.rssi <= -78
+                        ? 'bg-red-400'
+                        : beacon.rssi <= -65
+                          ? 'bg-amber-300'
+                          : 'bg-emerald-300'
                   }`}
-                  style={{ width: `${node.quality}%` }}
+                  style={{ width: `${beacon.quality}%` }}
                 />
               </div>
               <span className="text-right font-semibold text-stone-400">
-                {node.liveRssi} dBm · {node.vestCount}개
+                {beacon.rssi === undefined ? '대기' : `${beacon.rssi} dBm`}
               </span>
               <span className="col-start-2 text-[11px] font-semibold text-stone-500">
-                {floorLabels[node.floor]} BLE mesh · {node.status}
+                {floorLabels[beacon.floor]} · {beacon.dist !== undefined ? `${beacon.dist.toFixed(1)}m` : `${beacon.count} samples`} · {beacon.status}
               </span>
             </div>
           ))}
@@ -123,76 +178,6 @@ function RiskPredictionPanel({
             </article>
           );
         })}
-      </div>
-    </section>
-  );
-}
-
-function TelemetryPanel({ worker }: { worker?: Worker }) {
-  if (!worker) {
-    return null;
-  }
-
-  const samples = Array.from({ length: 18 }, (_, index) => {
-    const base = Math.sin(index * 0.78 + worker.coords.x / 20) * worker.telemetry.accelerationG * 8;
-    const spike = worker.status === 'EMERGENCY' && index === 12 ? worker.telemetry.impactPeakG * 11 : 0;
-    return clamp(42 - base - spike, 8, 76);
-  });
-  const confidenceSamples = Array.from({ length: 18 }, (_, index) => {
-    const trend = worker.telemetry.fallConfidence - (17 - index) * 2.6 + Math.sin(index * 0.7) * 5;
-    return clamp(trend, 0, 100);
-  });
-  const latencyScore = clamp(Math.round(((200 - worker.telemetry.latencyMs) / 200) * 100), 0, 100);
-  const path = samples.map((y, index) => `${index === 0 ? 'M' : 'L'} ${index * 14} ${y}`).join(' ');
-
-  return (
-    <section className="border border-white/10 bg-[#101310] shadow-panel">
-      <PanelHeader icon={<Waves className="h-5 w-5 text-cyan-200" />} title="센서 텔레메트리" right={worker.worker_id} />
-      <div className="p-4">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <InfoTile label="Battery" value={`${Math.round(worker.battery)}%`} />
-          <InfoTile label="RSSI" value={`${worker.telemetry.rssiDbm} dBm`} />
-          <InfoTile label="6축 IMU" value={`${worker.telemetry.accelerationG.toFixed(1)}g`} />
-          <InfoTile label="Impact" value={`${worker.telemetry.impactPeakG.toFixed(1)}g`} />
-          <InfoTile label="Fall AI" value={`${worker.telemetry.fallConfidence}%`} />
-          <InfoTile label="Latency" value={`${worker.telemetry.latencyMs}ms`} />
-        </div>
-        <div className="mt-4 border border-white/10 bg-black/25 p-3">
-          <svg viewBox="0 0 238 84" className="h-24 w-full" role="img" aria-label="IMU waveform">
-            <path d="M0 42 H238" stroke="rgba(255,255,255,0.13)" strokeWidth="1" />
-            <path d={path} fill="none" stroke={worker.status === 'EMERGENCY' ? '#f87171' : '#67e8f9'} strokeWidth="3" />
-          </svg>
-        </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <MiniSparkline title="Battery" values={worker.batteryHistory} min={0} max={100} tone={worker.battery <= 25 ? 'red' : 'emerald'} unit="%" />
-          <MiniSparkline title="RSSI" values={worker.rssiHistory} min={-90} max={-45} tone={worker.telemetry.rssiDbm <= -72 ? 'red' : 'cyan'} unit="dBm" />
-          <MiniSparkline
-            title="Fall AI"
-            values={confidenceSamples}
-            min={0}
-            max={100}
-            tone={worker.telemetry.fallConfidence >= 70 ? 'red' : 'cyan'}
-            unit="%"
-          />
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <InfoTile label="Airbag" value={`${airbagLabels[worker.telemetry.airbagState]} · ${cartridgeLabels[worker.telemetry.airbagCartridge]}`} />
-          <InfoTile label="Edge Logic" value={worker.telemetry.latencyMs <= 200 ? '0.2s 이내' : '지연'} />
-        </div>
-        <div className="mt-3 border border-white/10 bg-black/25 p-3">
-          <div className="flex items-center justify-between text-xs font-bold">
-            <span className="text-stone-400">0.2초 판정 SLA</span>
-            <span className={worker.telemetry.latencyMs <= 200 ? 'text-emerald-100' : 'text-red-200'}>
-              {worker.telemetry.latencyMs}ms
-            </span>
-          </div>
-          <div className="mt-2 h-2 bg-white/10">
-            <div
-              className={worker.telemetry.latencyMs <= 200 ? 'h-full bg-emerald-300' : 'h-full bg-red-400'}
-              style={{ width: `${latencyScore}%` }}
-            />
-          </div>
-        </div>
       </div>
     </section>
   );

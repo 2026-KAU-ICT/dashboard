@@ -1,7 +1,5 @@
 import {
-  Activity,
   BatteryWarning,
-  BrainCircuit,
   Cpu,
   Gauge,
   HardHat,
@@ -27,6 +25,7 @@ import { SiteMap } from './components/SiteMap';
 import { MetricCard } from './components/ui';
 import {
   QUERY_KEYS,
+  beaconAnchors,
   defaultGatewayZoneSettings,
   defaultZoneSettings,
   floorLabels,
@@ -106,8 +105,77 @@ function App() {
     [gatewayZoneSettings],
   );
 
+  const resolveBeaconZoneAnchors = useCallback((payload: GatewayPayload): GatewayAnchor[] => {
+    const seen = new Set<string>();
+    return (payload.beacons ?? [])
+      .map((beacon): GatewayAnchor | undefined => {
+        if (seen.has(beacon.id)) {
+          return undefined;
+        }
+
+        seen.add(beacon.id);
+        if (beacon.x !== undefined && beacon.y !== undefined) {
+          return {
+            id: beacon.id,
+            label: beacon.id,
+            x: beacon.x,
+            y: beacon.y,
+          };
+        }
+
+        const anchor =
+          beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase() && item.floor === payload.floor) ??
+          beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase());
+        return anchor
+          ? {
+              id: beacon.id,
+              label: anchor.label,
+              x: anchor.x,
+              y: anchor.y,
+            }
+          : undefined;
+      })
+      .filter((anchor): anchor is GatewayAnchor => Boolean(anchor))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }, []);
+
+  const syncBeaconZoneFromPayload = useCallback(
+    (payload: GatewayPayload) => {
+      const anchors = resolveBeaconZoneAnchors(payload);
+      if (anchors.length < 3) {
+        return;
+      }
+
+      const isSameAnchors = (currentAnchors: GatewayAnchor[]) =>
+        currentAnchors.length === anchors.length &&
+        currentAnchors.every((anchor, index) => {
+          const nextAnchor = anchors[index];
+          return anchor.id === nextAnchor.id && anchor.x === nextAnchor.x && anchor.y === nextAnchor.y;
+        });
+
+      setGatewayZoneSettings((current) =>
+        isSameAnchors(current[payload.floor].anchors)
+          ? current
+          : {
+              ...current,
+              [payload.floor]: { anchors },
+            },
+      );
+      setDraftGatewayZoneSettings((current) =>
+        isSameAnchors(current[payload.floor].anchors)
+          ? current
+          : {
+              ...current,
+              [payload.floor]: { anchors },
+            },
+      );
+    },
+    [resolveBeaconZoneAnchors],
+  );
+
   const pushWorkerUpdate = useCallback(
     (payload: GatewayPayload, message?: string) => {
+      syncBeaconZoneFromPayload(payload);
       const normalizedWorker = normalizeGatewayPayload(payload);
       const calibratedGateway = payload.gateway_id ?? findNearestGatewayAnchor(payload.floor, payload.coords)?.id ?? normalizedWorker.gateway;
       const nextWorker: Worker = {
@@ -143,6 +211,7 @@ function App() {
             battery: nextBattery,
             gateway: nextWorker.gateway,
             gateway_id: nextWorker.gateway_id,
+            beacons: nextWorker.beacons?.length ? nextWorker.beacons : worker.beacons,
             telemetry: {
               ...worker.telemetry,
               ...nextWorker.telemetry,
@@ -178,7 +247,7 @@ function App() {
         ...current,
       ].slice(0, 60));
     },
-    [findNearestGatewayAnchor, queryClient],
+    [findNearestGatewayAnchor, queryClient, syncBeaconZoneFromPayload],
   );
 
   useEffect(() => {
@@ -199,6 +268,16 @@ function App() {
           x: clamp(base.coords.x + driftX + (tick % 3) * 5, 12, 190),
           y: clamp(base.coords.y + driftY + (tick % 4) * 3, 12, 132),
         };
+        const floorBeacons = beaconAnchors.filter((beacon) => beacon.floor === base.floor).slice(0, 4);
+        const beacons = floorBeacons.map((beacon) => {
+          const distance = Math.hypot(beacon.x - coords.x, beacon.y - coords.y);
+          const dist = Number((distance * 0.34).toFixed(1));
+          return {
+            id: beacon.id,
+            dist,
+            rssi: Math.round(clamp(-42 - distance * 0.28 + Math.sin(tick + beacon.x) * 2, -92, -35)),
+          };
+        });
         const unhookedDanger = !nextHooked && isInSafetyHookZone({ ...base, coords, status, is_hooked: nextHooked }, zoneSettings);
 
         pushWorkerUpdate({
@@ -208,9 +287,9 @@ function App() {
           is_hooked: nextHooked,
           coords,
           timestamp: new Date().toISOString(),
+          beacons,
           telemetry: createTelemetry(status, {
             accelerationG: Number((0.8 + Math.abs(Math.sin(tick)) * (status === 'EMERGENCY' ? 4.2 : 1.4)).toFixed(1)),
-            impactPeakG: Number((1 + Math.abs(Math.cos(tick * 0.7)) * (status === 'EMERGENCY' ? 6.4 : 2.1)).toFixed(1)),
             fallConfidence: status === 'EMERGENCY' ? 96 : unhookedDanger ? 72 : status === 'WARNING' ? 55 : 12,
             latencyMs: status === 'EMERGENCY' ? 142 : 118 + (tick % 6) * 9,
             rssiDbm: -55 - (tick % 7) * 3 - (status === 'EMERGENCY' ? 8 : 0),
@@ -397,15 +476,13 @@ function App() {
     const total = workers.length;
     const unhooked = workers.filter((worker) => !worker.is_hooked).length;
     const emergency = workers.filter((worker) => worker.status === 'EMERGENCY').length;
-    const warning = workers.filter((worker) => worker.status === 'WARNING').length;
-    const predicted = workers.filter((worker) => calculateWorkerRisk(worker) >= 70).length;
     const lowBattery = workers.filter((worker) => worker.battery <= 25).length;
     const cartridgeReplace = workers.filter((worker) => worker.telemetry.airbagCartridge !== 'CHARGED').length;
     const latency = Math.round(
       workers.reduce((sum, worker) => sum + worker.telemetry.latencyMs, 0) / Math.max(total, 1),
     );
 
-    return { total, unhooked, emergency, warning, predicted, lowBattery, cartridgeReplace, latency };
+    return { total, unhooked, emergency, lowBattery, cartridgeReplace, latency };
   }, [workers]);
 
   const createGatewayCommandPayload = (command: DownlinkCommand) => {
@@ -492,7 +569,7 @@ function App() {
           case 'UPDATE_ZONE':
             return `${floorLabels[command.floor]} A-Hook 존 갱신`;
           case 'UPDATE_GATEWAY_ZONE':
-            return `${floorLabels[command.floor]} 게이트웨이 존 갱신`;
+            return `${floorLabels[command.floor]} 비콘 존 갱신`;
         }
       })();
 
@@ -764,7 +841,7 @@ function App() {
       <div className="mx-auto flex w-full max-w-[1840px] flex-col gap-4">
         <Header connectionState={connectionState} commandFeedback={commandFeedback} />
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <MetricCard
             icon={<HardHat className="h-6 w-6" />}
             label="총 작업자"
@@ -774,9 +851,9 @@ function App() {
           />
           <MetricCard
             icon={<ShieldAlert className="h-6 w-6" />}
-            label="미체결"
+            label="훅 미체결"
             value={metrics.unhooked}
-            helper="즉시 확인 대상"
+            helper="안전고리 미체결"
             tone="amber"
           />
           <MetricCard
@@ -785,20 +862,6 @@ function App() {
             value={metrics.emergency}
             helper="추락 징후"
             tone="red"
-          />
-          <MetricCard
-            icon={<Activity className="h-6 w-6" />}
-            label="경고 이벤트"
-            value={metrics.warning}
-            helper="0.2s 표시 SLA"
-            tone="cyan"
-          />
-          <MetricCard
-            icon={<BrainCircuit className="h-6 w-6" />}
-            label="예측 위험"
-            value={metrics.predicted}
-            helper="패턴 분석 대상"
-            tone="amber"
           />
           <MetricCard
             icon={<Gauge className="h-6 w-6" />}
@@ -823,7 +886,7 @@ function App() {
           />
         </section>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(330px,390px)] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(330px,390px)] lg:items-start 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]">
           <SiteMap
             workers={workers}
             selectedFloor={selectedFloor}
@@ -838,7 +901,7 @@ function App() {
             onSelectWorker={setSelectedWorkerId}
           />
 
-          <aside className="grid gap-4 xl:sticky xl:top-4 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+          <aside className="grid gap-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
             <ControlPanel
               selectedWorker={selectedWorker}
               zoneSettings={visibleZoneSettings}
@@ -857,8 +920,8 @@ function App() {
             />
           </aside>
 
-          <div className="min-w-0 xl:col-start-1 xl:row-start-2">
-            <OperationalPanels workers={workers} events={events} selectedWorker={selectedWorker} zoneSettings={zoneSettings} />
+          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            <OperationalPanels workers={workers} events={events} zoneSettings={zoneSettings} />
           </div>
         </div>
       </div>
