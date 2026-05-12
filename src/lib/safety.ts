@@ -188,15 +188,27 @@ const normalizeStatus = (raw: GatewayRawPayload, isHooked: boolean, zoneEntered 
   const fallDetected = readBoolean(raw, [
     'has_fallen',
     'hasFallen',
+    'fallen',
+    'fall',
     'fall_status',
     'fallStatus',
     'fall_detected',
     'fallDetected',
     'is_fall',
+    'isFall',
     'airbag_deployed',
   ]);
   const dangerZoneEntered =
-    readBoolean(raw, ['zone_entered', 'zoneEntered', 'hook_zone_required', 'danger_zone']) ?? zoneEntered;
+    readBoolean(raw, [
+      'zone_entered',
+      'zoneEntered',
+      'hook_zone_required',
+      'hookZoneRequired',
+      'danger_zone',
+      'dangerZone',
+      'in_danger_zone',
+      'inDangerZone',
+    ]) ?? zoneEntered;
 
   if (fallDetected || ['EMERGENCY', 'FALL', 'FALL_DETECTED', 'CRASH'].includes(value)) {
     return 'EMERGENCY';
@@ -279,20 +291,30 @@ const findBeaconAnchor = (id: string, floor?: FloorId) =>
   beaconCalibrationAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase());
 
 const readDetectedBeacons = (raw: GatewayRawPayload): BeaconSignal[] => {
-  const positionData = readAnyRecord(raw, ['position_data', 'positionData', 'position']) ?? raw;
-  const value = readValue(positionData, ['detected_beacons', 'detectedBeacons', 'beacons', 'beacon_list']);
+  const positionData = readAnyRecord(raw, ['position_data', 'positionData', 'position', 'location', 'loc']) ?? raw;
+  const value = readValue(positionData, [
+    'detected_beacons',
+    'detectedBeacons',
+    'beacons',
+    'beacon_list',
+    'beaconList',
+    'beacon_data',
+    'beaconData',
+    'rssi_list',
+    'rssiList',
+  ]);
 
   const normalizeBeacon = (item: unknown, fallbackId?: string): BeaconSignal | undefined => {
     if (!isRecord(item)) {
       return undefined;
     }
 
-    const id = readString(item, ['id', 'beacon_id', 'beaconId', 'uuid', 'name']) ?? fallbackId;
-    const rssi = readNumber(item, ['rssi', 'rssi_dbm', 'rssiDbm']);
-    const dist = readNumber(item, ['dist', 'distance', 'distance_m', 'distanceM']);
-    const coords = readRecord(item, 'coords') ?? readRecord(item, 'coord') ?? item;
-    const x = readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x']);
-    const y = readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y']);
+    const id = readString(item, ['id', 'beacon_id', 'beaconId', 'beaconID', 'uuid', 'name', 'mac', 'address']) ?? fallbackId;
+    const rssi = readNumber(item, ['rssi', 'rssi_dbm', 'rssiDbm', 'rssiDBM', 'signal', 'signal_strength', 'signalStrength']);
+    const dist = readNumber(item, ['dist', 'distance', 'distance_m', 'distanceM', 'range', 'range_m', 'rangeM', 'meter', 'meters']);
+    const coords = readRecord(item, 'coords') ?? readRecord(item, 'coord') ?? readRecord(item, 'position') ?? item;
+    const x = readNumber(coords, ['x', 'coord_x', 'coordX', 'relative_x', 'relativeX', 'rel_x', 'relX']);
+    const y = readNumber(coords, ['y', 'coord_y', 'coordY', 'relative_y', 'relativeY', 'rel_y', 'relY']);
     return id && rssi !== undefined
       ? { id, rssi, ...(dist !== undefined ? { dist } : {}), ...(x !== undefined && y !== undefined ? { x, y } : {}) }
       : undefined;
@@ -456,10 +478,10 @@ const isBeaconDangerZoneEntered = (floor: FloorId, beacons: BeaconSignal[]) => {
 };
 
 const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Partial<WorkerTelemetry> => {
-  const telemetry = readRecord(raw, 'telemetry') ?? raw;
+  const telemetry = readAnyRecord(raw, ['telemetry', 'sensor_data', 'sensorData', 'sensor']) ?? raw;
   const airbagDeployed =
-    readBoolean(raw, ['airbag_deployed', 'airbagDeployed']) ??
-    readBoolean(telemetry, ['airbag_deployed', 'airbagDeployed']);
+    readBoolean(raw, ['airbag_deployed', 'airbagDeployed', 'airbag_opened', 'airbagOpened']) ??
+    readBoolean(telemetry, ['airbag_deployed', 'airbagDeployed', 'airbag_opened', 'airbagOpened']);
   const airbagState = normalizeAirbagState(
     readValue(telemetry, ['airbagState', 'airbag_state', 'airbag']),
     airbagDeployed ? 'EMERGENCY' : status,
@@ -486,9 +508,9 @@ const normalizeTelemetry = (raw: GatewayRawPayload, status: WorkerStatus): Parti
 };
 
 const normalizeCoords = (raw: GatewayRawPayload, floor: FloorId, beacons: BeaconSignal[]): Coordinate => {
-  const coords = readRecord(raw, 'coords') ?? readRecord(raw, 'coord') ?? readRecord(raw, 'position') ?? raw;
-  const x = readNumber(coords, ['x', 'coord_x', 'relative_x', 'rel_x', 'coords.x']);
-  const y = readNumber(coords, ['y', 'coord_y', 'relative_y', 'rel_y', 'coords.y']);
+  const coords = readRecord(raw, 'coords') ?? readRecord(raw, 'coord') ?? readRecord(raw, 'position') ?? readRecord(raw, 'location') ?? raw;
+  const x = readNumber(coords, ['x', 'coord_x', 'coordX', 'relative_x', 'relativeX', 'rel_x', 'relX', 'coords.x']);
+  const y = readNumber(coords, ['y', 'coord_y', 'coordY', 'relative_y', 'relativeY', 'rel_y', 'relY', 'coords.y']);
   if (x !== undefined && y !== undefined) {
     return { x, y };
   }
@@ -509,9 +531,9 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
     return undefined;
   }
 
-  const header = readAnyRecord(raw, ['header']) ?? {};
-  const sensorData = readAnyRecord(raw, ['sensor_data', 'sensorData']) ?? {};
-  const positionData = readAnyRecord(raw, ['position_data', 'positionData']) ?? {};
+  const header = readAnyRecord(raw, ['header', 'meta', 'metadata']) ?? {};
+  const sensorData = readAnyRecord(raw, ['sensor_data', 'sensorData', 'sensor']) ?? {};
+  const positionData = readAnyRecord(raw, ['position_data', 'positionData', 'position', 'location']) ?? {};
   const statusData = readAnyRecord(raw, ['status']) ?? {};
   const expandedRaw: GatewayRawPayload = {
     ...raw,
@@ -521,26 +543,48 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
     ...statusData,
   };
   const detectedBeacons = readDetectedBeacons(expandedRaw);
-  const gatewayId = readString(expandedRaw, ['gateway_id', 'gatewayId', 'gateway', 'gw_id']);
+  const gatewayId = readString(expandedRaw, ['gateway_id', 'gatewayId', 'gatewayID', 'gateway', 'gw_id', 'gwId', 'gwID']);
   const workerId =
-    readString(expandedRaw, ['worker_id', 'workerId', 'vest_id', 'vestId', 'tag_id', 'device_id', 'deviceId']) ??
+    readString(expandedRaw, ['worker_id', 'workerId', 'workerID', 'vest_id', 'vestId', 'vestID', 'tag_id', 'tagId', 'device_id', 'deviceId', 'deviceID']) ??
     (gatewayId ? `W-${gatewayId}` : undefined);
   if (!workerId) {
     return undefined;
   }
 
-  const explicitFloor = readValue(expandedRaw, ['floor', 'level']);
+  const explicitFloor = readValue(expandedRaw, ['floor', 'floor_id', 'floorId', 'level', 'level_id', 'levelId']);
   const floor =
     explicitFloor === undefined
       ? inferFloorFromGatewayId(gatewayId) ?? inferFloorFromBeacons(detectedBeacons) ?? '1F'
       : normalizeFloor(explicitFloor);
   const zoneEntered = isBeaconDangerZoneEntered(floor, detectedBeacons);
-  const hookValue = readBoolean(expandedRaw, ['is_hooked', 'isHooked', 'hooked', 'hook_closed', 'hook_state']);
+  const hookValue = readBoolean(expandedRaw, [
+    'is_hooked',
+    'isHooked',
+    'hooked',
+    'hook',
+    'hook_closed',
+    'hookClosed',
+    'hook_state',
+    'hookState',
+    'hook_status',
+    'hookStatus',
+  ]);
   const status = normalizeStatus(expandedRaw, hookValue ?? true, zoneEntered);
   const isHooked = hookValue ?? status === 'NORMAL';
   const strongest = strongestBeacon(detectedBeacons);
   const telemetry = normalizeTelemetry(expandedRaw, status);
-  const fallDetected = readBoolean(expandedRaw, ['has_fallen', 'hasFallen', 'fall_status', 'fallStatus', 'fall_detected', 'fallDetected', 'is_fall']);
+  const fallDetected = readBoolean(expandedRaw, [
+    'has_fallen',
+    'hasFallen',
+    'fallen',
+    'fall',
+    'fall_status',
+    'fallStatus',
+    'fall_detected',
+    'fallDetected',
+    'is_fall',
+    'isFall',
+  ]);
 
   return {
     worker_id: workerId,
@@ -549,8 +593,18 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
     status,
     is_hooked: isHooked,
     coords: normalizeCoords(expandedRaw, floor, detectedBeacons),
-    timestamp: normalizeTimestamp(readValue(expandedRaw, ['timestamp', 'time', 'ts'])),
-    battery: readNumber(expandedRaw, ['battery', 'battery_percent', 'battery_pct', 'batteryPercent', 'batteryLevel', 'bat_pct']),
+    timestamp: normalizeTimestamp(readValue(expandedRaw, ['timestamp', 'time', 'ts', 'created_at', 'createdAt', 'sent_at', 'sentAt'])),
+    battery: readNumber(expandedRaw, [
+      'battery',
+      'battery_percent',
+      'battery_pct',
+      'batteryPercent',
+      'batteryLevel',
+      'battery_level',
+      'bat',
+      'bat_pct',
+      'batPct',
+    ]),
     beacons: detectedBeacons,
     telemetry: {
       ...telemetry,
@@ -561,7 +615,12 @@ export const normalizeRawGatewayPayload = (raw: unknown): GatewayPayload | undef
 };
 
 export const parseGatewayMessage = (data: unknown): GatewayPayload[] => {
-  const root = isRecord(data) && isRecord(data.payload) ? data.payload : data;
+  const root =
+    isRecord(data) && isRecord(data.payload)
+      ? data.payload
+      : isRecord(data) && isRecord(data.data)
+        ? data.data
+        : data;
   const envelope = isRecord(root) ? root : undefined;
   const list =
     Array.isArray(root)
@@ -570,9 +629,17 @@ export const parseGatewayMessage = (data: unknown): GatewayPayload[] => {
         ? root.workers
         : isRecord(root) && Array.isArray(root.devices)
           ? root.devices
-          : isRecord(root) && root.worker
-            ? [root.worker]
-          : [root];
+          : isRecord(root) && Array.isArray(root.vests)
+            ? root.vests
+            : isRecord(root) && Array.isArray(root.tags)
+              ? root.tags
+              : isRecord(root) && Array.isArray(root.readings)
+                ? root.readings
+                : isRecord(root) && root.worker
+                  ? [root.worker]
+                  : isRecord(root) && root.device
+                    ? [root.device]
+                    : [root];
 
   return list
     .map((item) => (envelope && isRecord(item) ? { ...envelope, ...item } : item))

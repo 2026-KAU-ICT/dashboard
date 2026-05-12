@@ -133,6 +133,70 @@ A-Hook은 작업자 조끼가 가까운 게이트웨이에 연결되는 구조�
 
 하드웨어 테스트 단계에서 확인된 RSSI 튐 현상은 대시보드 좌표에도 영향을 줄 수 있으므로, 웹은 `dist` 기반 삼변측량을 우선 사용하고 RSSI는 신호 품질 표시와 보조 좌표 추정에 사용합니다.
 
+필드명이 조금 바뀌어도 연결이 끊기지 않도록 대시보드는 `gw_id/gateway_id/gwId`, `worker_id/device_id/vest_id/tag_id`, `has_fallen/fall_detected/fallen`, `is_hooked/hooked/hook_state`, `beacons/beaconData/detected_beacons`, `dist/distance/distance_m`, `rssi/rssi_dbm/signalStrength` 같은 주요 별칭을 함께 처리합니다. 단, 완전히 새로운 의미의 필드 구조로 바뀌는 경우에는 웹 파서에 매핑을 한 번 추가해야 합니다.
+
+---
+
+## 실제 게이트웨이 연결 설정
+
+React 대시보드는 게이트웨이 ESP32가 열어둔 WebSocket 주소에 접속합니다. 로컬 실행 전 프로젝트 루트에 `.env` 파일을 만들고 아래처럼 게이트웨이 주소를 넣으면 됩니다.
+
+```env
+VITE_GATEWAY_WS_URL=ws://192.168.0.25/ws
+```
+
+층별 게이트웨이를 여러 개 동시에 연결하는 경우에는 쉼표로 구분합니다.
+
+```env
+VITE_GATEWAY_WS_URLS=ws://192.168.0.25/ws,ws://192.168.0.26/ws
+```
+
+주소를 넣지 않으면 대시보드는 시뮬레이션 게이트웨이 모드로 동작합니다. 실제 ESP32 연결 시에는 같은 Wi-Fi에 접속한 뒤 게이트웨이 IP와 `/ws` 경로를 맞춰야 합니다.
+
+## 웹에서 게이트웨이로 내려가는 명령
+
+관리자가 대시보드에서 원격 제어를 실행하면 WebSocket으로 아래와 같은 JSON이 게이트웨이에 전송됩니다. 게이트웨이 ESP32는 `command` 값을 기준으로 대상 조끼에 BLE 명령을 중계하면 됩니다.
+
+```json
+{
+  "type": "CONTROL",
+  "command": "ACTIVATE_ALARM",
+  "target_worker_id": "A001",
+  "target_id": "A001"
+}
+```
+
+```json
+{
+  "type": "CONTROL",
+  "command": "LED_BLINK",
+  "target_worker_id": "A001",
+  "target_id": "A001",
+  "mode": "FLASH"
+}
+```
+
+```json
+{
+  "type": "CONTROL",
+  "command": "EVACUATION_ALERT",
+  "scope": "FLOOR",
+  "floor": "3F",
+  "reason": "관리자 대피 알림"
+}
+```
+
+```json
+{
+  "type": "CONFIG",
+  "command": "UPDATE_ZONE",
+  "floor": "3F",
+  "threshold_rssi": -68,
+  "danger_radius_m": 8,
+  "zone_center": { "x": 116, "y": 68 }
+}
+```
+
 ---
 
 ## 제작 및 구현 계획
