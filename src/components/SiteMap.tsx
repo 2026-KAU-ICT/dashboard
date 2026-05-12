@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type PointerEvent } from 'react';
-import { Layers3, MapPinned, RadioTower, UserRound, Waypoints } from 'lucide-react';
+import { Layers3, MapPinned, RadioTower, UserRound } from 'lucide-react';
 import campusMap from '../assets/kau-campus.png';
-import { floorLabels, statusMeta } from '../config/dashboard';
+import { beaconAnchors, floorLabels, statusMeta } from '../config/dashboard';
 import { clamp } from '../lib/base';
 import {
   calculateWorkerRisk,
@@ -11,7 +11,7 @@ import {
   mapWorkerToZone,
   viewportToFloorCoords,
 } from '../lib/safety';
-import type { Coordinate, FloorFilter, FloorId, GatewayZoneSetting, Worker, ZoneSetting } from '../types';
+import type { Coordinate, FloorFilter, FloorId, Worker, ZoneSetting } from '../types';
 import { StatusBadge } from './ui';
 
 const floorTabs: FloorId[] = ['1F', '2F', '3F', '4F'];
@@ -23,10 +23,7 @@ export function SiteMap({
   selectedWorkerId,
   zoneSettings,
   editableZoneFloors,
-  gatewayZoneSettings,
-  editableGatewayZoneFloors,
   onZoneCenterChange,
-  onGatewayAnchorChange,
   onFloorChange,
   onSelectWorker,
 }: {
@@ -35,16 +32,12 @@ export function SiteMap({
   selectedWorkerId?: string;
   zoneSettings: Record<FloorId, ZoneSetting>;
   editableZoneFloors: FloorId[];
-  gatewayZoneSettings: Record<FloorId, GatewayZoneSetting>;
-  editableGatewayZoneFloors: FloorId[];
   onZoneCenterChange: (floor: FloorId, center: Coordinate) => void;
-  onGatewayAnchorChange: (floor: FloorId, anchorId: string, coords: Coordinate) => void;
   onFloorChange: (floor: FloorFilter) => void;
   onSelectWorker: (workerId: string) => void;
 }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [dragFloor, setDragFloor] = useState<FloorId | null>(null);
-  const [dragGatewayAnchor, setDragGatewayAnchor] = useState<{ floor: FloorId; anchorId: string } | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const activeFloor: FloorId = selectedFloor === 'ALL' ? '1F' : selectedFloor;
   const mapSource = satelliteMapUrl || campusMap;
@@ -55,14 +48,14 @@ export function SiteMap({
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
   const setting = zoneSettings[activeFloor];
-  const gatewayZone = gatewayZoneSettings[activeFloor];
   const isZoneEditable = editableZoneFloors.includes(activeFloor);
-  const isGatewayZoneEditable = editableGatewayZoneFloors.includes(activeFloor);
-  const gatewayPoints = gatewayZone.anchors.map((anchor) => ({
-    anchor,
-    point: mapCoordsToZone(activeFloor, anchor),
-  }));
-  const gatewayPolygonPoints = gatewayPoints.map(({ point }) => `${point.left},${point.top}`).join(' ');
+  const beaconPoints = beaconAnchors
+    .filter((anchor) => anchor.floor === activeFloor && anchor.id.startsWith('Safety_'))
+    .map((anchor) => ({
+      anchor,
+      point: mapCoordsToZone(activeFloor, anchor),
+    }));
+  const beaconPolygonPoints = beaconPoints.map(({ point }) => `${point.left},${point.top}`).join(' ');
   const dangerWidth = clamp((setting.dangerRadius * 2 / activeZone.metersWidth) * 100, 12, 52);
   const dangerHeight = clamp((setting.dangerRadius * 2 / activeZone.metersHeight) * 100, 12, 52);
   const breadcrumbPath = selectedWorker
@@ -75,18 +68,6 @@ export function SiteMap({
     : '';
 
   const updateDraggedZone = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragGatewayAnchor && mapRef.current && editableGatewayZoneFloors.includes(dragGatewayAnchor.floor)) {
-      const rect = mapRef.current.getBoundingClientRect();
-      const leftPercent = ((event.clientX - rect.left) / rect.width) * 100;
-      const topPercent = ((event.clientY - rect.top) / rect.height) * 100;
-      onGatewayAnchorChange(
-        dragGatewayAnchor.floor,
-        dragGatewayAnchor.anchorId,
-        viewportToFloorCoords(dragGatewayAnchor.floor, leftPercent, topPercent),
-      );
-      return;
-    }
-
     if (!dragFloor || !mapRef.current || !editableZoneFloors.includes(dragFloor)) {
       return;
     }
@@ -134,11 +115,9 @@ export function SiteMap({
           onPointerMove={updateDraggedZone}
           onPointerUp={() => {
             setDragFloor(null);
-            setDragGatewayAnchor(null);
           }}
           onPointerLeave={() => {
             setDragFloor(null);
-            setDragGatewayAnchor(null);
           }}
         >
           <img
@@ -157,56 +136,40 @@ export function SiteMap({
               borderColor: activeZone.border,
             }}
           >
-            <div className="absolute left-2 top-2 inline-flex items-center gap-1.5 border border-white/10 bg-black/60 px-1.5 py-1 text-[10px] font-black text-stone-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
-              <RadioTower className="h-3.5 w-3.5" />
-              {floorLabels[activeFloor]} Beacon Layer
-            </div>
-            <div className="absolute left-2 top-10 inline-flex items-center gap-1.5 border border-cyan-200/20 bg-black/60 px-1.5 py-1 text-[10px] font-black text-cyan-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
-              <Waypoints className="h-3.5 w-3.5" />
-              Beacon Zone Auto
-            </div>
             <div className="absolute right-2 top-2 inline-flex items-center gap-1.5 border border-white/10 bg-black/60 px-1.5 py-1 text-[10px] font-black text-stone-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
               <Layers3 className="h-3.5 w-3.5" />
               {visibleWorkers.length}명 표시
             </div>
-            {gatewayPolygonPoints ? (
+            <div className="absolute left-2 top-2 inline-flex items-center gap-1.5 border border-cyan-200/20 bg-black/60 px-1.5 py-1 text-[10px] font-black text-cyan-100 backdrop-blur sm:gap-2 sm:px-2 sm:text-xs">
+              <RadioTower className="h-3.5 w-3.5" />
+              비콘 설치 범위
+            </div>
+            {beaconPolygonPoints ? (
               <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <polygon
-                  points={gatewayPolygonPoints}
-                  fill="rgba(34, 211, 238, 0.12)"
-                  stroke="rgba(103, 232, 249, 0.88)"
+                  points={beaconPolygonPoints}
+                  fill="rgba(34, 211, 238, 0.1)"
+                  stroke="rgba(103, 232, 249, 0.84)"
                   strokeDasharray="1.4 1.1"
                   strokeWidth="0.42"
                 />
               </svg>
             ) : null}
-            {gatewayPoints.map(({ anchor, point }) => (
-              <button
-                key={anchor.id}
-                type="button"
-                className={`absolute z-10 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center border text-cyan-950 shadow-panel transition sm:h-9 sm:w-9 ${
-                  isGatewayZoneEditable
-                    ? 'cursor-grab border-cyan-100 bg-cyan-200 hover:scale-110 active:cursor-grabbing'
-                    : 'cursor-not-allowed border-cyan-200/50 bg-cyan-300/70'
-                }`}
+            {beaconPoints.map(({ anchor, point }) => (
+              <div
+                key={`${anchor.floor}-${anchor.id}`}
+                className="pointer-events-none absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-cyan-100 bg-cyan-300/85 text-cyan-950 shadow-panel sm:h-8 sm:w-8"
                 style={{
                   left: `${point.left}%`,
                   top: `${point.top}%`,
                 }}
-                title={`${floorLabels[activeFloor]} ${anchor.label} 비콘 기준점`}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  if (isGatewayZoneEditable) {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    setDragGatewayAnchor({ floor: activeFloor, anchorId: anchor.id });
-                  }
-                }}
+                title={`${floorLabels[activeFloor]} ${anchor.label} 설치 위치`}
               >
-                <RadioTower className="h-4 w-4" />
+                <RadioTower className="h-3.5 w-3.5" />
                 <span className="absolute left-1/2 top-full mt-1 hidden -translate-x-1/2 whitespace-nowrap border border-cyan-100/30 bg-black/70 px-1.5 py-0.5 text-[10px] font-black text-cyan-50 backdrop-blur sm:block">
-                  {anchor.label}
+                  {anchor.id}
                 </span>
-              </button>
+              </div>
             ))}
             <div
               className={`absolute z-10 rounded-full border border-amber-200/75 bg-amber-300/10 touch-none ${

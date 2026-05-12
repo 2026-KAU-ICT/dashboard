@@ -2,22 +2,19 @@ import {
   Cpu,
   Lightbulb,
   Megaphone,
-  RadioTower,
   Settings2,
   SlidersHorizontal,
   UsersRound,
   Volume2,
-  Waypoints,
 } from 'lucide-react';
 import { cartridgeLabels, floorLabels, ledLabels } from '../config/dashboard';
 import { calculateWorkerRisk, mapWorkerToZone } from '../lib/safety';
-import type { FloorId, GatewayZoneSetting, LedMode, Worker, ZoneSetting } from '../types';
+import type { FloorId, LedMode, Worker, ZoneSetting } from '../types';
 import { InfoTile, StatusBadge } from './ui';
 
 export function ControlPanel({
   selectedWorker,
   zoneSettings,
-  gatewayZoneSettings,
   onActivateAlarm,
   onBroadcastEvacuation,
   onLedModeChange,
@@ -25,14 +22,10 @@ export function ControlPanel({
   onZoneChange,
   onApplyZone,
   onBeginZoneEdit,
-  onApplyGatewayZone,
-  onBeginGatewayZoneEdit,
   editingZoneFloors,
-  editingGatewayZoneFloors,
 }: {
   selectedWorker?: Worker;
   zoneSettings: Record<FloorId, ZoneSetting>;
-  gatewayZoneSettings: Record<FloorId, GatewayZoneSetting>;
   onActivateAlarm: () => void;
   onBroadcastEvacuation: (floor: FloorId | 'ALL') => void;
   onLedModeChange: (mode: LedMode) => void;
@@ -40,10 +33,7 @@ export function ControlPanel({
   onZoneChange: (floor: FloorId, key: 'threshold' | 'dangerRadius', value: number) => void;
   onApplyZone: (floor: FloorId) => void;
   onBeginZoneEdit: (floor: FloorId) => void;
-  onApplyGatewayZone: (floor: FloorId) => void;
-  onBeginGatewayZoneEdit: (floor: FloorId) => void;
   editingZoneFloors: FloorId[];
-  editingGatewayZoneFloors: FloorId[];
 }) {
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
 
@@ -223,49 +213,6 @@ export function ControlPanel({
           })}
         </div>
 
-        <div className="mt-5 space-y-4">
-          <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
-            <Waypoints className="h-4 w-4 text-cyan-200" />
-            자동 비콘 존
-          </div>
-
-          {(Object.keys(gatewayZoneSettings) as FloorId[]).map((floor) => {
-            const setting = gatewayZoneSettings[floor];
-            return (
-              <div key={floor} className="border border-white/10 bg-black/20 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <strong className="text-sm text-stone-100">{floorLabels[floor]}</strong>
-                    <p className="mt-1 text-xs text-stone-500">수신된 비콘 기준점 {setting.anchors.length}개 연결</p>
-                  </div>
-                  <span className="border border-cyan-200/25 bg-cyan-200/10 px-2 py-1 text-xs font-black text-cyan-100">
-                    자동 반영
-                  </span>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4 xl:grid-cols-2">
-                  {setting.anchors.map((anchor) => (
-                    <div
-                      key={anchor.id}
-                      className="border border-cyan-200/20 bg-cyan-200/10 px-2 py-2 text-cyan-50"
-                    >
-                      <div className="flex items-center gap-1.5 font-black">
-                        <RadioTower className="h-3.5 w-3.5" />
-                        {anchor.label}
-                      </div>
-                      <p className="mt-1 font-semibold">
-                        {Math.round(anchor.x)}, {Math.round(anchor.y)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-xs font-semibold text-stone-500">
-                  수신된 비콘 ID와 설치 좌표를 기준으로 자동 구성됩니다.
-                </p>
-              </div>
-            );
-          })}
-        </div>
       </div>
     </section>
   );

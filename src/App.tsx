@@ -67,8 +67,6 @@ function App() {
   const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
   const [editingZoneFloors, setEditingZoneFloors] = useState<FloorId[]>([]);
   const [gatewayZoneSettings, setGatewayZoneSettings] = useState(defaultGatewayZoneSettings);
-  const [draftGatewayZoneSettings, setDraftGatewayZoneSettings] = useState(defaultGatewayZoneSettings);
-  const [editingGatewayZoneFloors, setEditingGatewayZoneFloors] = useState<FloorId[]>([]);
   const [commandFeedback, setCommandFeedback] = useState('대기 중');
   const [activeEmergency, setActiveEmergency] = useState<Worker | null>(null);
   const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
@@ -154,14 +152,6 @@ function App() {
         });
 
       setGatewayZoneSettings((current) =>
-        isSameAnchors(current[payload.floor].anchors)
-          ? current
-          : {
-              ...current,
-              [payload.floor]: { anchors },
-            },
-      );
-      setDraftGatewayZoneSettings((current) =>
         isSameAnchors(current[payload.floor].anchors)
           ? current
           : {
@@ -378,14 +368,6 @@ function App() {
     return next;
   }, [draftZoneSettings, editingZoneFloors, zoneSettings]);
 
-  const visibleGatewayZoneSettings = useMemo(() => {
-    const next = { ...gatewayZoneSettings };
-    editingGatewayZoneFloors.forEach((floor) => {
-      next[floor] = draftGatewayZoneSettings[floor];
-    });
-    return next;
-  }, [draftGatewayZoneSettings, editingGatewayZoneFloors, gatewayZoneSettings]);
-
   const pendingEmergencyWorker = useMemo(() => {
     return [...workers]
       .filter((worker) => worker.status === 'EMERGENCY' && !acknowledgedEmergencyIds.includes(worker.worker_id))
@@ -569,7 +551,7 @@ function App() {
           case 'UPDATE_ZONE':
             return `${floorLabels[command.floor]} A-Hook 존 갱신`;
           case 'UPDATE_GATEWAY_ZONE':
-            return `${floorLabels[command.floor]} 비콘 존 갱신`;
+            return `${floorLabels[command.floor]} 비콘 기준점 갱신`;
         }
       })();
 
@@ -678,57 +660,6 @@ function App() {
         center,
       },
     }));
-  };
-
-  const beginGatewayZoneEdit = (floor: FloorId) => {
-    setDraftGatewayZoneSettings((current) => ({
-      ...current,
-      [floor]: gatewayZoneSettings[floor],
-    }));
-    setEditingGatewayZoneFloors((current) => (current.includes(floor) ? current : [...current, floor]));
-  };
-
-  const updateGatewayAnchor = (floor: FloorId, anchorId: string, coords: Coordinate) => {
-    setDraftGatewayZoneSettings((current) => ({
-      ...current,
-      [floor]: {
-        anchors: current[floor].anchors.map((anchor) =>
-          anchor.id === anchorId
-            ? {
-                ...anchor,
-                ...coords,
-              }
-            : anchor,
-        ),
-      },
-    }));
-  };
-
-  const applyGatewayZoneSetting = (floor: FloorId) => {
-    const setting = draftGatewayZoneSettings[floor];
-    setGatewayZoneSettings((current) => ({
-      ...current,
-      [floor]: setting,
-    }));
-    setEditingGatewayZoneFloors((current) => current.filter((editingFloor) => editingFloor !== floor));
-    sendCommand({
-      command: 'UPDATE_GATEWAY_ZONE',
-      floor,
-      anchors: setting.anchors.map((anchor): GatewayAnchor => ({ ...anchor })),
-    });
-    queryClient.setQueryData<Worker[]>(QUERY_KEYS.workers, (current = initialWorkers) =>
-      current.map((worker) => {
-        if (worker.floor !== floor || worker.gateway_id) {
-          return worker;
-        }
-
-        const nearest = findNearestGatewayAnchor(worker.floor, worker.coords, {
-          ...gatewayZoneSettings,
-          [floor]: setting,
-        });
-        return nearest ? { ...worker, gateway: nearest.id } : worker;
-      }),
-    );
   };
 
   const setSelectedLedMode = (mode: LedMode) => {
@@ -893,10 +824,7 @@ function App() {
             selectedWorkerId={selectedWorker?.worker_id}
             zoneSettings={visibleZoneSettings}
             editableZoneFloors={editingZoneFloors}
-            gatewayZoneSettings={visibleGatewayZoneSettings}
-            editableGatewayZoneFloors={editingGatewayZoneFloors}
             onZoneCenterChange={updateZoneCenter}
-            onGatewayAnchorChange={updateGatewayAnchor}
             onFloorChange={changeFloor}
             onSelectWorker={setSelectedWorkerId}
           />
@@ -906,8 +834,6 @@ function App() {
               selectedWorker={selectedWorker}
               zoneSettings={visibleZoneSettings}
               editingZoneFloors={editingZoneFloors}
-              gatewayZoneSettings={visibleGatewayZoneSettings}
-              editingGatewayZoneFloors={editingGatewayZoneFloors}
               onActivateAlarm={activateSelectedAlarm}
               onBroadcastEvacuation={broadcastEvacuation}
               onLedModeChange={setSelectedLedMode}
@@ -915,8 +841,6 @@ function App() {
               onBeginZoneEdit={beginZoneEdit}
               onApplyZone={applyZoneSetting}
               onZoneChange={updateZoneSetting}
-              onBeginGatewayZoneEdit={beginGatewayZoneEdit}
-              onApplyGatewayZone={applyGatewayZoneSetting}
             />
           </aside>
 

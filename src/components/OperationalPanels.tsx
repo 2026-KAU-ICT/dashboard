@@ -4,7 +4,7 @@ import { clamp } from '../lib/base';
 import { calculateWorkerRisk, isInSafetyHookZone } from '../lib/safety';
 import type { BeaconSignal, EventLog, FloorId, Worker, ZoneSetting } from '../types';
 import { NotificationPanel } from './NotificationPanel';
-import { InfoTile, PanelHeader } from './ui';
+import { PanelHeader } from './ui';
 
 export function OperationalPanels({
   workers,
@@ -27,15 +27,11 @@ export function OperationalPanels({
 }
 
 function BeaconSignalPanel({ workers }: { workers: Worker[] }) {
-  const findAnchor = (id: string, floor: FloorId) =>
-    beaconAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase() && anchor.floor === floor) ??
-    beaconAnchors.find((anchor) => anchor.id.toLowerCase() === id.toLowerCase());
   const grouped = new Map<
     string,
     {
       id: string;
       label: string;
-      floor: FloorId;
       rssiSum: number;
       count: number;
       dist?: number;
@@ -45,12 +41,10 @@ function BeaconSignalPanel({ workers }: { workers: Worker[] }) {
 
   workers.forEach((worker) => {
     worker.beacons?.forEach((beacon: BeaconSignal) => {
-      const anchor = findAnchor(beacon.id, worker.floor);
-      const key = `${worker.floor}-${beacon.id}`;
-      const current = grouped.get(key) ?? {
+      const anchor = beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase());
+      const current = grouped.get(beacon.id) ?? {
         id: beacon.id,
         label: anchor?.label ?? beacon.id,
-        floor: anchor?.floor ?? worker.floor,
         rssiSum: 0,
         count: 0,
         dist: undefined,
@@ -61,11 +55,11 @@ function BeaconSignalPanel({ workers }: { workers: Worker[] }) {
       current.count += 1;
       current.dist = current.dist === undefined || (beacon.dist !== undefined && beacon.dist < current.dist) ? beacon.dist : current.dist;
       current.workerNames.add(worker.name);
-      grouped.set(key, current);
+      grouped.set(beacon.id, current);
     });
   });
 
-  const liveRows = [...grouped.values()]
+  const liveSignals = [...grouped.values()]
     .map((beacon) => {
       const rssi = Math.round(beacon.rssiSum / beacon.count);
       const quality = clamp(((rssi + 100) / 80) * 100, 8, 98);
@@ -77,63 +71,99 @@ function BeaconSignalPanel({ workers }: { workers: Worker[] }) {
         status,
       };
     })
-    .sort((a, b) => b.rssi - a.rssi)
-    .slice(0, 6);
+    .sort((a, b) => a.id.localeCompare(b.id));
 
-  const rows = liveRows.length
-    ? liveRows
-    : beaconAnchors.slice(0, 4).map((anchor) => ({
-        id: anchor.id,
-        label: anchor.label,
-        floor: anchor.floor,
-        rssi: undefined,
-        quality: 12,
-        status: '수신 대기',
-        dist: undefined,
-        count: 0,
-        workerNames: new Set<string>(),
-      }));
-  const averageRssi = liveRows.length
-    ? `${Math.round(liveRows.reduce((sum, row) => sum + row.rssi, 0) / liveRows.length)} dBm`
+  const fallbackBeacons = Array.from(
+    new Map(
+      beaconAnchors
+        .filter((anchor) => anchor.id.startsWith('Safety_'))
+        .map((anchor) => [anchor.id, anchor]),
+    ).values(),
+  ).slice(0, 4);
+  const rows = fallbackBeacons.map((anchor) => {
+    const liveSignal = liveSignals.find((signal) => signal.id.toLowerCase() === anchor.id.toLowerCase());
+    return liveSignal ?? {
+      id: anchor.id,
+      label: anchor.label,
+      rssi: undefined,
+      quality: 12,
+      status: '수신 대기',
+      dist: undefined,
+      count: 0,
+      workerNames: new Set<string>(),
+    };
+  });
+  const averageRssi = liveSignals.length
+    ? `${Math.round(liveSignals.reduce((sum, row) => sum + row.rssi, 0) / liveSignals.length)} dBm`
     : '수신 대기';
-  const sampleCount = liveRows.reduce((sum, row) => sum + row.count, 0);
+  const signalTone = (rssi?: number) =>
+    rssi === undefined
+      ? 'bg-stone-600'
+      : rssi <= -78
+        ? 'bg-red-400'
+        : rssi <= -65
+          ? 'bg-amber-300'
+          : 'bg-emerald-300';
+  const statusTone = (rssi?: number) =>
+    rssi === undefined
+      ? 'border-stone-500/30 bg-stone-500/10 text-stone-400'
+      : rssi <= -78
+        ? 'border-red-300/35 bg-red-400/10 text-red-100'
+        : rssi <= -65
+          ? 'border-amber-300/35 bg-amber-300/10 text-amber-100'
+          : 'border-emerald-300/35 bg-emerald-300/10 text-emerald-100';
+  const workerNames = (names: Set<string>) => {
+    const list = [...names];
+    if (!list.length) {
+      return '감지 대기';
+    }
+
+    return list.length > 2 ? `${list.slice(0, 2).join(', ')} 외 ${list.length - 2}명` : list.join(', ');
+  };
 
   return (
     <section className="border border-white/10 bg-[#101310] shadow-panel">
       <PanelHeader icon={<RadioTower className="h-5 w-5 text-emerald-300" />} title="비콘 신호 강도" right={averageRssi} />
       <div className="space-y-3 p-4">
         <div className="grid grid-cols-2 gap-2">
-          <InfoTile label="Beacon" value={`${rows.length}개`} />
-          <InfoTile label="Sample" value={sampleCount ? `${sampleCount} readings` : '대기'} />
-        </div>
-        <div className="border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-100">
-          조끼가 측정한 비콘 RSSI/거리 → 게이트웨이 → WebSocket 대시보드
+          <div className="border border-white/10 bg-black/25 px-3 py-2">
+            <p className="text-[11px] font-semibold text-stone-500">설치 비콘</p>
+            <strong className="mt-1 block text-sm font-black text-stone-100">{rows.length}개 기준점</strong>
+          </div>
+          <div className="border border-white/10 bg-black/25 px-3 py-2">
+            <p className="text-[11px] font-semibold text-stone-500">활성 비콘</p>
+            <strong className="mt-1 block text-sm font-black text-stone-100">
+              {liveSignals.length}/{rows.length}개 수신
+            </strong>
+          </div>
         </div>
         <div className="space-y-2">
           {rows.map((beacon) => (
-            <div key={beacon.id} className="grid grid-cols-[76px_1fr_92px] items-center gap-2 text-xs sm:grid-cols-[88px_1fr_110px]">
-              <span className="font-bold text-stone-200">{beacon.label}</span>
-              <div className="h-2 bg-white/10">
-                <div
-                  className={`h-full ${
-                    beacon.rssi === undefined
-                      ? 'bg-stone-600'
-                      : beacon.rssi <= -78
-                        ? 'bg-red-400'
-                        : beacon.rssi <= -65
-                          ? 'bg-amber-300'
-                          : 'bg-emerald-300'
-                  }`}
-                  style={{ width: `${beacon.quality}%` }}
-                />
+            <article key={beacon.id} className="border border-white/10 bg-black/20 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 text-xs font-black text-stone-100">
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${signalTone(beacon.rssi)}`} />
+                    <span className="truncate">{beacon.label}</span>
+                  </p>
+                  <p className="mt-1 truncate text-[11px] font-semibold text-stone-500">{workerNames(beacon.workerNames)}</p>
+                </div>
+                <span className={`shrink-0 whitespace-nowrap border px-2 py-1 text-xs font-black ${statusTone(beacon.rssi)}`}>
+                  {beacon.status}
+                </span>
               </div>
-              <span className="text-right font-semibold text-stone-400">
-                {beacon.rssi === undefined ? '대기' : `${beacon.rssi} dBm`}
-              </span>
-              <span className="col-start-2 text-[11px] font-semibold text-stone-500">
-                {floorLabels[beacon.floor]} · {beacon.dist !== undefined ? `${beacon.dist.toFixed(1)}m` : `${beacon.count} samples`} · {beacon.status}
-              </span>
-            </div>
+              <div className="mt-3">
+                <div className="h-2.5 bg-white/10">
+                  <div className={`h-full ${signalTone(beacon.rssi)}`} style={{ width: `${beacon.quality}%` }} />
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-[11px] font-semibold text-stone-500">
+                  <span>{beacon.dist !== undefined ? `거리 ${beacon.dist.toFixed(1)}m` : '거리 계산 대기'}</span>
+                  <span className="text-stone-300">
+                    {beacon.rssi === undefined ? 'RSSI 대기' : `${beacon.rssi} dBm`}
+                  </span>
+                </div>
+              </div>
+            </article>
           ))}
         </div>
       </div>
