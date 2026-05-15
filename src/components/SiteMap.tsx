@@ -172,8 +172,10 @@ export function SiteMap({
               </div>
             ))}
             <div
-              className={`pointer-events-none absolute z-10 rounded-full border border-amber-200/75 bg-amber-300/10 ${
-                isZoneEditable ? 'opacity-100' : 'opacity-70'
+              className={`absolute z-10 rounded-full border border-amber-200/75 bg-amber-300/10 touch-none ${
+                isZoneEditable
+                  ? 'pointer-events-auto cursor-grab active:cursor-grabbing'
+                  : 'pointer-events-none opacity-70'
               }`}
               style={{
                 left: `${(setting.center.x / activeZone.sourceWidth) * 100}%`,
@@ -182,8 +184,17 @@ export function SiteMap({
                 height: `${dangerHeight}%`,
                 transform: 'translate(-50%, -50%)',
               }}
+              onPointerDown={(event) => {
+                if (!isZoneEditable) {
+                  return;
+                }
+
+                event.stopPropagation();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setDragFloor(activeFloor);
+              }}
             >
-              <span className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100 sm:block">
+              <span className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100 sm:block">
                 Hook Zone
               </span>
             </div>

@@ -3,7 +3,7 @@ import { clamp } from '../lib/base';
 import type { Esp32BeaconData, Esp32RuntimeData } from '../types';
 import { PanelHeader } from './ui';
 
-const OUTER_BEACON_IDS = ['Safety_01', 'Safety_04'];
+const OUTER_BEACON_IDS = ['BEACON_01', 'BEACON_04'];
 const OUTER_DISTANCE_THRESHOLD = 2.5;
 
 type RiskResult = {

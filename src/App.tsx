@@ -109,7 +109,8 @@ function App() {
   const [activeGatewayIds, setActiveGatewayIds] = useState<number[]>([]);
   const [gatewayHookStatusMap, setGatewayHookStatusMap] = useState<Record<number, boolean>>({});
   const [gatewayFallStatusMap, setGatewayFallStatusMap] = useState<Record<number, boolean>>({});
-  const [gatewayLatencyMap, setGatewayLatencyMap] = useState<Record<number, number>>({});
+  const [gatewayUptimeMap, setGatewayUptimeMap] = useState<Record<number, number>>({});
+  const [gatewayUpdateDelayMap, setGatewayUpdateDelayMap] = useState<Record<number, number>>({});
   const [esp32DeviceMap, setEsp32DeviceMap] = useState<Record<number, Esp32RuntimeData>>({});
   const [zoneSettings, setZoneSettings] = useState(defaultZoneSettings);
   const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
@@ -120,14 +121,36 @@ function App() {
   const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
   const [emergencyActionResult, setEmergencyActionResult] = useState<EmergencyActionResult | null>(null);
   const [controlActionResult, setControlActionResult] = useState<ControlActionResult | null>(null);
+  const activeFloor: FloorId = selectedFloor === 'ALL' ? '1F' : selectedFloor;
 
   const socketsRef = useRef<WebSocket[]>([]);
+
+  const previousGatewayReceiveRef = useRef<
+    Record<number, { ts: number; receivedAtMs: number }>
+  >({});
+
   const sirenRef = useRef<{
     context: AudioContext;
     oscillator: OscillatorNode;
     lfo: OscillatorNode;
     gain: GainNode;
   } | null>(null);
+
+  const formatUptime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+      return `${h}시간 ${m}분 ${s}초`;
+    }
+
+    if (m > 0) {
+      return `${m}분 ${s}초`;
+    }
+
+    return `${s}초`;
+  };
 
   const { data: workers = [] } = useQuery<Worker[]>({
     queryKey: QUERY_KEYS.workers,
@@ -154,6 +177,7 @@ function App() {
 
   const resolveBeaconZoneAnchors = useCallback((payload: GatewayPayload): GatewayAnchor[] => {
     const seen = new Set<string>();
+
     return (payload.beacons ?? [])
       .map((beacon): GatewayAnchor | undefined => {
         if (seen.has(beacon.id)) {
@@ -161,6 +185,7 @@ function App() {
         }
 
         seen.add(beacon.id);
+
         if (beacon.x !== undefined && beacon.y !== undefined) {
           return {
             id: beacon.id,
@@ -191,6 +216,7 @@ function App() {
   const syncBeaconZoneFromPayload = useCallback(
     (payload: GatewayPayload) => {
       const anchors = resolveBeaconZoneAnchors(payload);
+
       if (anchors.length < 3) {
         return;
       }
@@ -315,6 +341,7 @@ function App() {
     setConnectionState('mock');
 
     let tick = 0;
+
     const timer = window.setInterval(() => {
       tick += 1;
 
@@ -388,6 +415,7 @@ function App() {
       }
 
       const openCount = sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length;
+
       if (openCount > 0) {
         setConnectionState('live');
         return;
@@ -421,141 +449,171 @@ function App() {
         console.log('ESP32 원본 데이터:', event.data);
 
         try {
+          const receivedAtMs = Date.now();
+
           const parsedData = JSON.parse(event.data);
           console.log('JSON 변환된 데이터:', parsedData);
 
-        const esp32Data = parsedData as Partial<Esp32GatewayData>;
+          const esp32Data = parsedData as Partial<Esp32GatewayData>;
 
-        const receivedAtMs = Date.now();
+          const gatewayUptimeSec =
+            typeof esp32Data.ts === 'number'
+              ? esp32Data.ts
+              : 0;
 
-        const rawLatencyMs =
-          typeof esp32Data.ts === 'number'
-            ? receivedAtMs - esp32Data.ts * 1000
-            : 0;
+          // 갱신 지연 계산
+          // ESP32의 ts는 "게이트웨이가 켜진 뒤 지난 시간"입니다.
+          // 따라서 절대적인 네트워크 지연시간은 계산할 수 없고,
+          // 이전 데이터와 현재 데이터의 ts 차이와 React 수신 간격을 비교해서
+          // "1초 주기 대비 데이터 수신이 얼마나 밀렸는지"를 계산합니다.
+          let updateDelayMs = 0;
 
-        const safeLatencyMs = rawLatencyMs >= 0 ? rawLatencyMs : 0;
+          if (typeof esp32Data.gw_id === 'number' && typeof esp32Data.ts === 'number') {
+            const gwId = esp32Data.gw_id;
+            const previous = previousGatewayReceiveRef.current[gwId];
 
-        if (typeof esp32Data.gw_id === 'number') {
-          const gwId = esp32Data.gw_id;
+            if (previous) {
+              const expectedIntervalMs = (gatewayUptimeSec - previous.ts) * 1000;
+              const actualIntervalMs = receivedAtMs - previous.receivedAtMs;
+              const rawUpdateDelayMs = actualIntervalMs - expectedIntervalMs;
 
-          setActiveGatewayIds((current) =>
-            current.includes(gwId)
-              ? current
-              : [...current, gwId],
-          );
+              updateDelayMs = Math.round(clamp(rawUpdateDelayMs, 0, 10000));
+            }
 
-          if (typeof esp32Data.status?.is_hooked === 'boolean') {
-            setGatewayHookStatusMap((current) => ({
+            previousGatewayReceiveRef.current[gwId] = {
+              ts: gatewayUptimeSec,
+              receivedAtMs,
+            };
+
+            setGatewayUpdateDelayMap((current) => ({
               ...current,
-              [gwId]: esp32Data.status!.is_hooked,
+              [gwId]: updateDelayMs,
             }));
           }
 
-          if (typeof esp32Data.status?.has_fallen === 'boolean') {
-            setGatewayFallStatusMap((current) => ({
+          const safeLatencyMs = updateDelayMs;
+
+          if (typeof esp32Data.gw_id === 'number') {
+            const gwId = esp32Data.gw_id;
+
+            setActiveGatewayIds((current) =>
+              current.includes(gwId)
+                ? current
+                : [...current, gwId],
+            );
+
+            setGatewayUptimeMap((current) => ({
               ...current,
-              [gwId]: esp32Data.status!.has_fallen,
+              [gwId]: gatewayUptimeSec,
             }));
-          }
 
-          setGatewayLatencyMap((current) => ({
-            ...current,
-            [gwId]: safeLatencyMs,
-          }));
+            if (typeof esp32Data.status?.is_hooked === 'boolean') {
+              setGatewayHookStatusMap((current) => ({
+                ...current,
+                [gwId]: esp32Data.status!.is_hooked,
+              }));
+            }
 
-          if (
-            typeof esp32Data.status?.is_hooked === 'boolean' &&
-            typeof esp32Data.status?.has_fallen === 'boolean'
-          ) {
-            setEsp32DeviceMap((current) => ({
-              ...current,
-              [gwId]: {
-                gw_id: gwId,
-                status: {
-                  is_hooked: esp32Data.status!.is_hooked,
-                  has_fallen: esp32Data.status!.has_fallen,
+            if (typeof esp32Data.status?.has_fallen === 'boolean') {
+              setGatewayFallStatusMap((current) => ({
+                ...current,
+                [gwId]: esp32Data.status!.has_fallen,
+              }));
+            }
+
+            if (
+              typeof esp32Data.status?.is_hooked === 'boolean' &&
+              typeof esp32Data.status?.has_fallen === 'boolean'
+            ) {
+              setEsp32DeviceMap((current) => ({
+                ...current,
+                [gwId]: {
+                  gw_id: gwId,
+                  status: {
+                    is_hooked: esp32Data.status!.is_hooked,
+                    has_fallen: esp32Data.status!.has_fallen,
+                  },
+                  beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
+                  ts: esp32Data.ts,
+                  receivedAt: new Date(receivedAtMs).toISOString(),
+                  latencyMs: safeLatencyMs,
                 },
-                beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
-                ts: esp32Data.ts,
-                receivedAt: new Date(receivedAtMs).toISOString(),
-                latencyMs: safeLatencyMs,
-              },
-            }));
+              }));
+            }
           }
-        }
 
-        const payloads = parseGatewayMessage(parsedData);
-        console.log('대시보드용으로 변환된 데이터:', payloads);
+          const payloads = parseGatewayMessage(parsedData);
+          console.log('대시보드용으로 변환된 데이터:', payloads);
 
-        if (!payloads.length) {
-          console.warn('parseGatewayMessage 결과가 비어 있음');
-          setCommandFeedback('수신 데이터 필드 확인 필요');
-          return;
-        }
+          if (!payloads.length) {
+            console.warn('parseGatewayMessage 결과가 비어 있음');
+            setCommandFeedback('수신 데이터 필드 확인 필요');
+            return;
+          }
 
-        const mappedPayloads = payloads.map((payload) => {
-          const floor: FloorId =
-            typeof esp32Data.gw_id === 'number'
-              ? esp32Data.gw_id === 1
-                ? '1F'
-                : esp32Data.gw_id === 2
-                  ? '2F'
-                  : esp32Data.gw_id === 3
-                    ? '3F'
-                    : '4F'
-              : payload.floor;
+          const mappedPayloads = payloads.map((payload) => {
+            const floor: FloorId =
+              typeof esp32Data.gw_id === 'number'
+                ? esp32Data.gw_id === 1
+                  ? '1F'
+                  : esp32Data.gw_id === 2
+                    ? '2F'
+                    : esp32Data.gw_id === 3
+                      ? '3F'
+                      : '4F'
+                : payload.floor;
 
-          const estimatedCoords = estimateWorkerCoordsFromBeacons(
-            floor,
-            Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
-          );
+            const estimatedCoords = estimateWorkerCoordsFromBeacons(
+              floor,
+              Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
+            );
 
-          const averageRssi =
-            Array.isArray(esp32Data.beacons) && esp32Data.beacons.length > 0
-              ? Math.round(
-                  esp32Data.beacons.reduce((sum, beacon) => sum + beacon.rssi, 0) /
-                    esp32Data.beacons.length,
-                )
-              : payload.telemetry?.rssiDbm ?? 0;
+            const averageRssi =
+              Array.isArray(esp32Data.beacons) && esp32Data.beacons.length > 0
+                ? Math.round(
+                    esp32Data.beacons.reduce((sum, beacon) => sum + beacon.rssi, 0) /
+                      esp32Data.beacons.length,
+                  )
+                : payload.telemetry?.rssiDbm ?? 0;
 
-          const status: WorkerStatus =
-            esp32Data.status?.has_fallen === true
-              ? 'EMERGENCY'
-              : esp32Data.status?.is_hooked === false
-                ? 'WARNING'
-                : 'NORMAL';
+            const status: WorkerStatus =
+              esp32Data.status?.has_fallen === true
+                ? 'EMERGENCY'
+                : esp32Data.status?.is_hooked === false
+                  ? 'WARNING'
+                  : 'NORMAL';
 
-          return {
-            ...payload,
+            return {
+              ...payload,
 
-            worker_id: `ESP32-GW-${esp32Data.gw_id ?? 'UNKNOWN'}`,
+              worker_id: `ESP32-GW-${esp32Data.gw_id ?? 'UNKNOWN'}`,
 
-            floor,
-            gateway_id: typeof esp32Data.gw_id === 'number' ? esp32Data.gw_id : payload.gateway_id,
+              floor,
+              gateway_id: typeof esp32Data.gw_id === 'number' ? esp32Data.gw_id : payload.gateway_id,
 
-            status,
-            is_hooked:
-              typeof esp32Data.status?.is_hooked === 'boolean'
-                ? esp32Data.status.is_hooked
-                : payload.is_hooked,
+              status,
+              is_hooked:
+                typeof esp32Data.status?.is_hooked === 'boolean'
+                  ? esp32Data.status.is_hooked
+                  : payload.is_hooked,
 
-            coords: estimatedCoords ?? payload.coords,
-            beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : payload.beacons,
+              coords: estimatedCoords ?? payload.coords,
+              beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : payload.beacons,
 
-            timestamp: new Date(receivedAtMs).toISOString(),
+              timestamp: new Date(receivedAtMs).toISOString(),
 
-            telemetry: {
-              ...payload.telemetry,
-              rssiDbm: averageRssi,
-              latencyMs: safeLatencyMs,
-              fallConfidence: esp32Data.status?.has_fallen ? 100 : 0,
-            },
-          };
-        });
+              telemetry: {
+                ...payload.telemetry,
+                rssiDbm: averageRssi,
+                latencyMs: safeLatencyMs,
+                fallConfidence: esp32Data.status?.has_fallen ? 100 : 0,
+              },
+            };
+          });
 
-        mappedPayloads.forEach((payload) => {
-          pushWorkerUpdateRef.current(payload as GatewayPayload);
-        });
+          mappedPayloads.forEach((payload) => {
+            pushWorkerUpdateRef.current(payload as GatewayPayload);
+          });
         } catch (error) {
           console.error('수신 데이터 처리 중 오류:', error);
           setCommandFeedback('수신 데이터 형식 오류');
@@ -584,6 +642,7 @@ function App() {
       }
 
       const floorWorker = workers.find((worker) => worker.floor === floor);
+
       if (floorWorker) {
         setSelectedWorkerId(floorWorker.worker_id);
       }
@@ -724,16 +783,19 @@ function App() {
     const unhooked = activeGatewayIds.filter((gwId) => gatewayHookStatusMap[gwId] === false).length;
     const emergency = activeGatewayIds.filter((gwId) => gatewayFallStatusMap[gwId] === true).length;
 
-    const latencyValues = activeGatewayIds
-      .map((gwId) => gatewayLatencyMap[gwId])
-      .filter((latency): latency is number => typeof latency === 'number');
+    const updateDelayValues = activeGatewayIds
+      .map((gwId) => gatewayUpdateDelayMap[gwId])
+      .filter((delay): delay is number => typeof delay === 'number');
 
-    const latency = latencyValues.length
-      ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
+    const averageUpdateDelayMs = updateDelayValues.length
+      ? Math.round(
+          updateDelayValues.reduce((sum, delay) => sum + delay, 0) /
+            updateDelayValues.length,
+        )
       : 0;
 
-    return { total, unhooked, emergency, latency };
-  }, [activeGatewayIds, gatewayHookStatusMap, gatewayFallStatusMap, gatewayLatencyMap]);
+    return { total, unhooked, emergency, averageUpdateDelayMs };
+  }, [activeGatewayIds, gatewayHookStatusMap, gatewayFallStatusMap, gatewayUpdateDelayMap]);
 
   const createGatewayCommandPayload = (command: DownlinkCommand) => {
     switch (command.command) {
@@ -1098,9 +1160,9 @@ function App() {
           />
           <MetricCard
             icon={<Gauge className="h-6 w-6" />}
-            label="평균 지연"
-            value={metrics.latency}
-            helper="ms 수신 지연"
+            label="갱신 지연"
+            value={metrics.averageUpdateDelayMs}
+            helper="ms / 수신 주기 오차"
             tone="cyan"
           />
         </section>
@@ -1121,6 +1183,13 @@ function App() {
             <ControlPanel
               selectedWorker={selectedWorker}
               risk={riskAnalysisRisk}
+              activeFloor={activeFloor}
+              zoneSetting={draftZoneSettings[activeFloor]}
+              isZoneEditable={editingZoneFloors.includes(activeFloor)}
+              onBeginZoneEdit={() => beginZoneEdit(activeFloor)}
+              onZoneRadiusChange={(value) => updateZoneSetting(activeFloor, 'dangerRadius', value)}
+              onZoneThresholdChange={(value) => updateZoneSetting(activeFloor, 'threshold', value)}
+              onApplyZoneSetting={() => applyZoneSetting(activeFloor)}
               onActivateAlarm={activateSelectedAlarm}
               onBroadcastFloor={() => {
                 if (!selectedWorker) {
