@@ -220,6 +220,14 @@ function App() {
     XLSX.writeFile(workbook, `사고_발생_데이터_${safeFileTime}.xlsx`);
   }, [accidentSnapshot, accidentTime]);
 
+  const resetAccidentCapture = useCallback(() => {
+    fallDetectedAtMsRef.current = null;
+    accidentSnapshotRef.current = [];
+    setAccidentTime(null);
+    setAccidentSnapshot([]);
+    setIsAccidentDataReady(false);
+  }, []);
+
   const { data: workers = [] } = useQuery<Worker[]>({
     queryKey: QUERY_KEYS.workers,
     queryFn: async () => [],
@@ -728,9 +736,13 @@ function App() {
             if (hasFallen && fallDetectedAtMsRef.current === null) {
               const fallTimeMs = receivedAtMs;
 
+              // 새 사고가 시작되면 이전 사고 데이터 초기화
+              accidentSnapshotRef.current = [];
+              setAccidentSnapshot([]);
+              setIsAccidentDataReady(false);
+
               fallDetectedAtMsRef.current = fallTimeMs;
               setAccidentTime(formatAccidentTime(new Date(fallTimeMs)));
-              setIsAccidentDataReady(false);
 
               window.setTimeout(() => {
                 const snapshot = accidentLogRef.current.filter((log) => {
@@ -744,6 +756,10 @@ function App() {
                 setAccidentSnapshot(snapshot);
                 setIsAccidentDataReady(true);
               }, 30000);
+            }
+
+            if (!hasFallen && fallDetectedAtMsRef.current !== null) {
+              fallDetectedAtMsRef.current = null;
             }
 
             pushWorkerUpdateRef.current(gatewayPayload);
