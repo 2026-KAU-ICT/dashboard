@@ -5,6 +5,7 @@ import {
   Siren,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ControlActionDialog,
@@ -101,6 +102,20 @@ function estimateWorkerCoordsFromBeacons(
   };
 }
 
+type AccidentLogRow = {
+  timestampMs: number;
+  time: string;
+  gatewayId: number;
+  workerId: string;
+  floor: FloorId;
+  workerX: number;
+  workerY: number;
+  isHooked: boolean;
+  hasFallen: boolean;
+  isInsideHookZone: boolean;
+  riskScore: number;
+};
+
 function App() {
   const queryClient = useQueryClient();
   const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('1F');
@@ -119,6 +134,13 @@ function App() {
   const [commandFeedback, setCommandFeedback] = useState('대기 중');
   const [activeEmergency, setActiveEmergency] = useState<Worker | null>(null);
   const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
+  const [accidentTime, setAccidentTime] = useState<string | null>(null);
+  const [accidentSnapshot, setAccidentSnapshot] = useState<AccidentLogRow[]>([]);
+  const [isAccidentDataReady, setIsAccidentDataReady] = useState(false);
+
+  const accidentLogRef = useRef<AccidentLogRow[]>([]);
+  const fallDetectedAtMsRef = useRef<number | null>(null);
+  const accidentSnapshotRef = useRef<AccidentLogRow[]>([]);
   const [emergencyActionResult, setEmergencyActionResult] = useState<EmergencyActionResult | null>(null);
   const [controlActionResult, setControlActionResult] = useState<ControlActionResult | null>(null);
   const activeFloor: FloorId = selectedFloor === 'ALL' ? '1F' : selectedFloor;
@@ -151,6 +173,52 @@ function App() {
 
     return `${s}초`;
   };
+
+  const formatAccidentTime = (date: Date) =>
+    date.toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  
+  const downloadAccidentExcel = useCallback(() => {
+    const rows = accidentSnapshotRef.current.length
+      ? accidentSnapshotRef.current
+      : accidentSnapshot;
+
+    if (!rows.length) {
+      alert('다운로드할 사고 데이터가 없습니다.');
+      return;
+    }
+
+    const excelData = rows.map((log, index) => ({
+      번호: index + 1,
+      기록시간: log.time,
+      게이트웨이ID: log.gatewayId,
+      작업자ID: log.workerId,
+      층: log.floor,
+      작업자_X좌표: Number(log.workerX.toFixed(2)),
+      작업자_Y좌표: Number(log.workerY.toFixed(2)),
+      훅체결여부: log.isHooked ? '체결됨' : '미체결',
+      추락감지여부: log.hasFallen ? '추락 감지' : '정상',
+      훅존위치: log.isInsideHookZone ? '훅존 내부' : '훅존 외부',
+      위험도점수: log.riskScore,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, '사고 발생 데이터');
+
+    const safeFileTime = (accidentTime ?? formatAccidentTime(new Date()))
+      .replace(/[/:]/g, '-')
+      .replace(/\s/g, '_');
+
+    XLSX.writeFile(workbook, `사고_발생_데이터_${safeFileTime}.xlsx`);
+  }, [accidentSnapshot, accidentTime]);
 
   const { data: workers = [] } = useQuery<Worker[]>({
     queryKey: QUERY_KEYS.workers,
@@ -612,7 +680,73 @@ function App() {
           });
 
           mappedPayloads.forEach((payload) => {
-            pushWorkerUpdateRef.current(payload as GatewayPayload);
+            const gatewayPayload = payload as GatewayPayload;
+
+            const logWorker = normalizeGatewayPayload(gatewayPayload);
+
+            const hasFallen = gatewayPayload.status === 'EMERGENCY';
+            const isHooked = gatewayPayload.is_hooked;
+            const isUnhooked = !isHooked;
+
+            const isOuterArea =
+              gatewayPayload.coords.x <= 20 ||
+              gatewayPayload.coords.x >= 180 ||
+              gatewayPayload.coords.y <= 15 ||
+              gatewayPayload.coords.y >= 125;
+
+            const isInsideHookZone = isInSafetyHookZone(
+              logWorker,
+              zoneSettings,
+            );
+
+            const fallScore = hasFallen ? 60 : 0;
+            const hookScore = isUnhooked ? 15 : 0;
+            const outerScore = isOuterArea ? 15 : 0;
+            const hookZoneScore = !isInsideHookZone ? 10 : 0;
+
+            const riskScore = fallScore + hookScore + outerScore + hookZoneScore;
+
+            const logRow: AccidentLogRow = {
+              timestampMs: receivedAtMs,
+              time: formatAccidentTime(new Date(receivedAtMs)),
+              gatewayId:
+                typeof gatewayPayload.gateway_id === 'number'
+                  ? gatewayPayload.gateway_id
+                  : Number(gatewayPayload.worker_id.replace('ESP32-GW-', '')),
+              workerId: gatewayPayload.worker_id,
+              floor: gatewayPayload.floor,
+              workerX: gatewayPayload.coords.x,
+              workerY: gatewayPayload.coords.y,
+              isHooked,
+              hasFallen,
+              isInsideHookZone,
+              riskScore,
+            };
+
+            accidentLogRef.current = [...accidentLogRef.current, logRow].slice(-1000);
+
+            if (hasFallen && fallDetectedAtMsRef.current === null) {
+              const fallTimeMs = receivedAtMs;
+
+              fallDetectedAtMsRef.current = fallTimeMs;
+              setAccidentTime(formatAccidentTime(new Date(fallTimeMs)));
+              setIsAccidentDataReady(false);
+
+              window.setTimeout(() => {
+                const snapshot = accidentLogRef.current.filter((log) => {
+                  return (
+                    log.timestampMs >= fallTimeMs - 30000 &&
+                    log.timestampMs <= fallTimeMs + 30000
+                  );
+                });
+
+                accidentSnapshotRef.current = snapshot;
+                setAccidentSnapshot(snapshot);
+                setIsAccidentDataReady(true);
+              }, 30000);
+            }
+
+            pushWorkerUpdateRef.current(gatewayPayload);
           });
         } catch (error) {
           console.error('수신 데이터 처리 중 오류:', error);
@@ -1233,6 +1367,9 @@ function App() {
       {activeEmergency && (
         <EmergencyOverlay
           worker={activeEmergency}
+          accidentTime={accidentTime}
+          isAccidentDataReady={isAccidentDataReady}
+          onDownloadAccidentExcel={downloadAccidentExcel}
           onAlarm={() => handleEmergencyAction('ALARM_RELAY')}
           onBroadcast={() => handleEmergencyAction('BROADCAST_WARNING')}
           onAcknowledge={() => handleEmergencyAction('ACK_STOP')}
