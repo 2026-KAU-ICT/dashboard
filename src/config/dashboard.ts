@@ -174,10 +174,10 @@ export const initialEvents: EventLog[] = [
 ];
 
 export const defaultZoneSettings: Record<FloorId, ZoneSetting> = {
-  '1F': { threshold: -66, dangerRadius: 9, center: { x: 104, y: 74 } },
-  '2F': { threshold: -69, dangerRadius: 8, center: { x: 120, y: 64 } },
-  '3F': { threshold: -68, dangerRadius: 8, center: { x: 116, y: 68 } },
-  '4F': { threshold: -71, dangerRadius: 6, center: { x: 114, y: 66 } },
+  '1F': { threshold: -66, dangerRadius: 9, center: { x: 90, y: 74 } },
+  '2F': { threshold: -69, dangerRadius: 8, center: { x: 100, y: 64 } },
+  '3F': { threshold: -68, dangerRadius: 8, center: { x: 80, y: 68 } },
+  '4F': { threshold: -71, dangerRadius: 6, center: { x: 95, y: 66 } },
 };
 
 export const gatewayNodes: GatewayNode[] = [
@@ -202,55 +202,55 @@ export const gatewayNodes: GatewayNode[] = [
 export const defaultGatewayZoneSettings: Record<FloorId, GatewayZoneSetting> = {
   '1F': {
     anchors: [
-      { id: 'Safety_01', label: 'Safety 01', x: 48, y: 46 },
-      { id: 'Safety_02', label: 'Safety 02', x: 148, y: 48 },
-      { id: 'Safety_03', label: 'Safety 03', x: 154, y: 110 },
-      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 112 },
+      { id: 'Safety_01', label: 'Safety 01', x: 55, y: 30 },
+      { id: 'Safety_02', label: 'Safety 02', x: 135, y: 32 },
+      { id: 'Safety_03', label: 'Safety 03', x: 135, y: 103 },
+      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 100 },
     ],
   },
   '2F': {
     anchors: [
-      { id: 'Safety_01', label: 'Safety 01', x: 52, y: 44 },
-      { id: 'Safety_02', label: 'Safety 02', x: 150, y: 50 },
-      { id: 'Safety_03', label: 'Safety 03', x: 148, y: 108 },
-      { id: 'Safety_04', label: 'Safety 04', x: 50, y: 106 },
+      { id: 'Safety_01', label: 'Safety 01', x: 55, y: 30 },
+      { id: 'Safety_02', label: 'Safety 02', x: 135, y: 32 },
+      { id: 'Safety_03', label: 'Safety 03', x: 135, y: 103 },
+      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 100 },
     ],
   },
   '3F': {
     anchors: [
-      { id: 'Safety_01', label: 'Safety 01', x: 52, y: 42 },
-      { id: 'Safety_02', label: 'Safety 02', x: 150, y: 42 },
-      { id: 'Safety_03', label: 'Safety 03', x: 152, y: 103 },
-      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 104 },
+      { id: 'Safety_01', label: 'Safety 01', x: 55, y: 30 },
+      { id: 'Safety_02', label: 'Safety 02', x: 135, y: 32 },
+      { id: 'Safety_03', label: 'Safety 03', x: 135, y: 103 },
+      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 100 },
     ],
   },
   '4F': {
     anchors: [
-      { id: 'Safety_01', label: 'Safety 01', x: 52, y: 44 },
-      { id: 'Safety_02', label: 'Safety 02', x: 146, y: 72 },
-      { id: 'Safety_03', label: 'Safety 03', x: 154, y: 108 },
-      { id: 'Safety_04', label: 'Safety 04', x: 48, y: 105 },
+      { id: 'Safety_01', label: 'Safety 01', x: 55, y: 30 },
+      { id: 'Safety_02', label: 'Safety 02', x: 135, y: 32 },
+      { id: 'Safety_03', label: 'Safety 03', x: 135, y: 103 },
+      { id: 'Safety_04', label: 'Safety 04', x: 54, y: 100 },
     ],
   },
 };
 
 export const beaconAnchors: BeaconAnchor[] = [
-  { id: 'Safety_01', floor: '1F', label: 'Safety 01', x: 48, y: 46 },
-  { id: 'Safety_02', floor: '1F', label: 'Safety 02', x: 148, y: 48 },
-  { id: 'Safety_03', floor: '1F', label: 'Safety 03', x: 154, y: 110 },
-  { id: 'Safety_04', floor: '1F', label: 'Safety 04', x: 54, y: 112 },
-  { id: 'Safety_01', floor: '2F', label: 'Safety 01', x: 52, y: 44 },
-  { id: 'Safety_02', floor: '2F', label: 'Safety 02', x: 150, y: 50 },
-  { id: 'Safety_03', floor: '2F', label: 'Safety 03', x: 148, y: 108 },
-  { id: 'Safety_04', floor: '2F', label: 'Safety 04', x: 50, y: 106 },
-  { id: 'Safety_01', floor: '3F', label: 'Safety 01', x: 52, y: 42 },
-  { id: 'Safety_02', floor: '3F', label: 'Safety 02', x: 150, y: 42 },
-  { id: 'Safety_03', floor: '3F', label: 'Safety 03', x: 152, y: 103 },
-  { id: 'Safety_04', floor: '3F', label: 'Safety 04', x: 54, y: 104 },
-  { id: 'Safety_01', floor: '4F', label: 'Safety 01', x: 52, y: 44 },
-  { id: 'Safety_02', floor: '4F', label: 'Safety 02', x: 146, y: 72 },
-  { id: 'Safety_03', floor: '4F', label: 'Safety 03', x: 154, y: 108 },
-  { id: 'Safety_04', floor: '4F', label: 'Safety 04', x: 48, y: 105 },
+  { id: 'Safety_01', floor: '1F', label: 'Safety 01', x: 55, y: 30 },
+  { id: 'Safety_02', floor: '1F', label: 'Safety 02', x: 135, y: 32 },
+  { id: 'Safety_03', floor: '1F', label: 'Safety 03', x: 135, y: 103 },
+  { id: 'Safety_04', floor: '1F', label: 'Safety 04', x: 54, y: 100 },
+  { id: 'Safety_01', floor: '2F', label: 'Safety 01', x: 55, y: 30 },
+  { id: 'Safety_02', floor: '2F', label: 'Safety 02', x: 135, y: 32 },
+  { id: 'Safety_03', floor: '2F', label: 'Safety 03', x: 135, y: 103 },
+  { id: 'Safety_04', floor: '2F', label: 'Safety 04', x: 54, y: 100 },
+  { id: 'Safety_01', floor: '3F', label: 'Safety 01', x: 55, y: 30 },
+  { id: 'Safety_02', floor: '3F', label: 'Safety 02', x: 135, y: 32 },
+  { id: 'Safety_03', floor: '3F', label: 'Safety 03', x: 135, y: 103 },
+  { id: 'Safety_04', floor: '3F', label: 'Safety 04', x: 54, y: 100 },
+  { id: 'Safety_01', floor: '4F', label: 'Safety 01', x: 55, y: 30 },
+  { id: 'Safety_02', floor: '4F', label: 'Safety 02', x: 135, y: 32 },
+  { id: 'Safety_03', floor: '4F', label: 'Safety 03', x: 135, y: 103 },
+  { id: 'Safety_04', floor: '4F', label: 'Safety 04', x: 54, y: 100 },
   { id: 'ZONE_A_01', floor: '1F', label: 'Zone A 01', x: 48, y: 46 },
   { id: 'ZONE_A_02', floor: '1F', label: 'Zone A 02', x: 148, y: 48 },
   { id: 'ZONE_A_03', floor: '1F', label: 'Zone A 03', x: 154, y: 110 },

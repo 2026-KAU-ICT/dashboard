@@ -1,39 +1,30 @@
 import {
-  Cpu,
-  Lightbulb,
+  MapPinned,
   Megaphone,
+  RadioTower,
   Settings2,
-  SlidersHorizontal,
-  UsersRound,
+  ShieldCheck,
+  Siren,
+  UserRound,
   Volume2,
 } from 'lucide-react';
-import { cartridgeLabels, floorLabels, ledLabels } from '../config/dashboard';
-import { calculateWorkerRisk, mapWorkerToZone } from '../lib/safety';
-import type { FloorId, LedMode, Worker, ZoneSetting } from '../types';
+import { floorLabels } from '../config/dashboard';
+import { mapWorkerToZone } from '../lib/safety';
+import type { Worker } from '../types';
 import { InfoTile, StatusBadge } from './ui';
 
 export function ControlPanel({
   selectedWorker,
-  zoneSettings,
+  risk,
   onActivateAlarm,
-  onBroadcastEvacuation,
-  onLedModeChange,
-  onResetCartridge,
-  onZoneChange,
-  onApplyZone,
-  onBeginZoneEdit,
-  editingZoneFloors,
+  onBroadcastFloor,
+  onBroadcastSite,
 }: {
   selectedWorker?: Worker;
-  zoneSettings: Record<FloorId, ZoneSetting>;
+  risk?: number;
   onActivateAlarm: () => void;
-  onBroadcastEvacuation: (floor: FloorId | 'ALL') => void;
-  onLedModeChange: (mode: LedMode) => void;
-  onResetCartridge: () => void;
-  onZoneChange: (floor: FloorId, key: 'threshold' | 'dangerRadius', value: number) => void;
-  onApplyZone: (floor: FloorId) => void;
-  onBeginZoneEdit: (floor: FloorId) => void;
-  editingZoneFloors: FloorId[];
+  onBroadcastFloor: () => void;
+  onBroadcastSite: () => void;
 }) {
   const selectedMapPoint = selectedWorker ? mapWorkerToZone(selectedWorker) : undefined;
 
@@ -42,9 +33,11 @@ export function ControlPanel({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 p-4">
         <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
           <Settings2 className="h-5 w-5 text-cyan-200" />
-          Downlink Control
+          작업자 실시간 정보
         </div>
-        <span className="border border-white/10 bg-white/[0.04] px-2 py-1 text-xs font-semibold text-stone-300">양방향</span>
+        <span className="border border-white/10 bg-white/[0.04] px-2 py-1 text-xs font-semibold text-stone-300">
+          선택 중
+        </span>
       </div>
 
       <div className="p-4">
@@ -52,167 +45,156 @@ export function ControlPanel({
           <div className="border border-white/10 bg-black/20 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-semibold text-stone-400">{selectedWorker.worker_id}</p>
-                <h2 className="mt-1 text-xl font-black tracking-normal text-stone-50">{selectedWorker.name}</h2>
+                <p className="text-xs font-semibold text-stone-400">
+                  {selectedWorker.worker_id}
+                </p>
+                <h2 className="mt-1 text-xl font-black tracking-normal text-stone-50">
+                  {selectedWorker.name}
+                </h2>
                 <p className="mt-1 text-sm text-stone-400">
-                  {floorLabels[selectedWorker.floor]} · {selectedWorker.role} · {selectedWorker.gateway}
+                  {floorLabels[selectedWorker.floor]} · {selectedWorker.role} ·{' '}
+                  {selectedWorker.gateway}
                 </p>
               </div>
               <StatusBadge status={selectedWorker.status} />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-3">
-              <InfoTile label="Hook" value={selectedWorker.is_hooked ? '체결' : '미체결'} />
-              <InfoTile label="Battery" value={`${Math.round(selectedWorker.battery)}%`} />
-              <InfoTile label="RSSI XY" value={`${Math.round(selectedWorker.coords.x)}, ${Math.round(selectedWorker.coords.y)}`} />
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-3">
-              <InfoTile label="Risk" value={`${calculateWorkerRisk(selectedWorker)}%`} />
-              <InfoTile label="Cartridge" value={cartridgeLabels[selectedWorker.telemetry.airbagCartridge]} />
-              <InfoTile label="LED" value={ledLabels[selectedWorker.telemetry.ledMode]} />
-            </div>
-            <div className="mt-2 grid gap-2 text-center text-xs sm:grid-cols-2">
-              <InfoTile label="Map px" value={selectedMapPoint ? `${selectedMapPoint.pixelX}, ${selectedMapPoint.pixelY}` : '-'} />
-              <InfoTile label="Field m" value={selectedMapPoint ? `${selectedMapPoint.meterX}, ${selectedMapPoint.meterY}` : '-'} />
+            <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs">
+              <InfoTile
+                label="Hook"
+                value={selectedWorker.is_hooked ? '체결' : '미체결'}
+              />
+              <InfoTile
+                label="Risk"
+                value={typeof risk === 'number' ? `${risk}%` : '-'}
+              />
             </div>
 
-            <button
-              type="button"
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 bg-red-500 px-4 py-3 text-sm font-black text-white transition hover:bg-red-400"
-              onClick={onActivateAlarm}
-            >
-              <Volume2 className="h-5 w-5" />
-              원격 사이렌 작동
-            </button>
-            <div className="mt-2 grid grid-cols-3 border border-white/10 bg-[#111411] text-[11px] font-black sm:text-xs">
-              {(['OFF', 'STEADY', 'FLASH'] as LedMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`inline-flex items-center justify-center gap-1 px-2 py-2 transition ${
-                    selectedWorker.telemetry.ledMode === mode
-                      ? 'bg-amber-300 text-amber-950'
-                      : 'text-stone-300 hover:bg-white/10'
-                  }`}
-                  onClick={() => onLedModeChange(mode)}
-                >
-                  <Lightbulb className="h-3.5 w-3.5" />
-                  {ledLabels[mode]}
-                </button>
-              ))}
+            <div className="mt-2 grid grid-cols-2 gap-2 text-center text-xs">
+              <InfoTile
+                label="위치 좌표"
+                value={`${Math.round(selectedWorker.coords.x)}, ${Math.round(
+                  selectedWorker.coords.y,
+                )}`}
+              />
+              <InfoTile
+                label="Gateway"
+                value={selectedWorker.gateway}
+              />
             </div>
-            <button
-              type="button"
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 border border-amber-300/35 px-4 py-3 text-sm font-black text-amber-100 transition hover:bg-amber-300/10"
-              onClick={() => onBroadcastEvacuation(selectedWorker.floor)}
-            >
-              <Megaphone className="h-5 w-5" />
-              같은 층 작업자 동시 경고
-            </button>
-            {selectedWorker.telemetry.airbagCartridge !== 'CHARGED' ? (
-              <button
-                type="button"
-                className="mt-2 inline-flex w-full items-center justify-center gap-2 border border-emerald-300/35 px-4 py-3 text-sm font-black text-emerald-100 transition hover:bg-emerald-300/10"
-                onClick={onResetCartridge}
-              >
-                <Cpu className="h-5 w-5" />
-                에어백 카트리지 교체 완료
-              </button>
-            ) : null}
+
+            <div className="mt-2 grid grid-cols-2 gap-2 text-center text-xs">
+              <InfoTile
+                label="Map px"
+                value={
+                  selectedMapPoint
+                    ? `${selectedMapPoint.pixelX}, ${selectedMapPoint.pixelY}`
+                    : '-'
+                }
+              />
+              <InfoTile
+                label="Field m"
+                value={
+                  selectedMapPoint
+                    ? `${selectedMapPoint.meterX}, ${selectedMapPoint.meterY}`
+                    : '-'
+                }
+              />
+            </div>
+
+            <div className="mt-4 border border-white/10 bg-black/25 p-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-stone-300">
+                <RadioTower className="h-4 w-4 text-cyan-200" />
+                수신 비콘 데이터
+              </div>
+
+              {selectedWorker.beacons?.length ? (
+                <div className="mt-3 grid gap-2">
+                  {selectedWorker.beacons.map((beacon) => (
+                    <div
+                      key={beacon.id}
+                      className="flex items-center justify-between border border-white/10 bg-black/25 px-3 py-2 text-xs"
+                    >
+                      <span className="font-bold text-stone-200">
+                        {beacon.id}
+                      </span>
+                      <span className="text-stone-400">
+                        {typeof beacon.dist === 'number' ? `${beacon.dist}m` : '-'}
+                        {' · '}
+                        {typeof beacon.rssi === 'number'
+                          ? `${beacon.rssi} dBm`
+                          : '-'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs font-semibold text-stone-500">
+                  아직 수신된 비콘 데이터가 없습니다.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 border border-white/10 bg-black/25 p-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-stone-300">
+                <Siren className="h-4 w-4 text-red-300" />
+                원격 제어
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 bg-red-500 px-3 py-2 text-xs font-black text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={onActivateAlarm}
+                  disabled={!selectedWorker}
+                >
+                  <Volume2 className="h-4 w-4" />
+                  원격 사이렌 작동
+                </button>
+
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 bg-amber-300 px-3 py-2 text-xs font-black text-amber-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={onBroadcastFloor}
+                  disabled={!selectedWorker}
+                >
+                  <Megaphone className="h-4 w-4" />
+                  같은 층 작업자 동시 알림
+                </button>
+
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 border border-white/20 px-3 py-2 text-xs font-black text-red-50 transition hover:bg-white/10"
+                  onClick={onBroadcastSite}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  전체 현장 대피 알림
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 text-xs">
+              <div className="flex items-center gap-2 border border-white/10 bg-black/25 px-3 py-2 text-stone-300">
+                <UserRound className="h-4 w-4 text-emerald-300" />
+                현재 선택된 작업자의 WebSocket 수신 데이터가 지도와 이 패널에 반영됩니다.
+              </div>
+
+              <div className="flex items-center gap-2 border border-white/10 bg-black/25 px-3 py-2 text-stone-300">
+                <MapPinned className="h-4 w-4 text-amber-300" />
+                비콘 거리값을 기반으로 계산된 위치 좌표입니다.
+              </div>
+
+              <div className="flex items-center gap-2 border border-white/10 bg-black/25 px-3 py-2 text-stone-300">
+                <ShieldCheck className="h-4 w-4 text-cyan-300" />
+                Hook 상태와 추락 감지 상태에 따라 위험도가 갱신됩니다.
+              </div>
+            </div>
           </div>
         ) : (
           <div className="border border-white/10 bg-black/20 p-4 text-sm font-semibold text-stone-400">
-            지도에서 작업자 아이콘을 선택하면 후크 체결, 배터리, 좌표, 비콘 신호 상태가 여기에 표시됩니다.
+            지도에서 작업자 아이콘을 선택하면 현재 수신 중인 작업자 데이터가 여기에 표시됩니다.
           </div>
         )}
-
-        <button
-          type="button"
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 border border-red-300/35 px-4 py-3 text-sm font-black text-red-100 transition hover:bg-red-300/10"
-          onClick={() => onBroadcastEvacuation('ALL')}
-        >
-          <UsersRound className="h-5 w-5" />
-          전체 현장 대피 알림
-        </button>
-
-        <div className="mt-5 space-y-4">
-          <div className="flex items-center gap-2 text-sm font-bold text-stone-100">
-            <SlidersHorizontal className="h-4 w-4 text-emerald-300" />
-            A-Hook 존
-          </div>
-
-          {(Object.keys(zoneSettings) as FloorId[]).map((floor) => {
-            const setting = zoneSettings[floor];
-            const isEditing = editingZoneFloors.includes(floor);
-            return (
-              <div key={floor} className="border border-white/10 bg-black/20 p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <strong className="text-sm text-stone-100">{floorLabels[floor]}</strong>
-                    <p className="mt-1 text-xs text-stone-500">
-                      중심 {Math.round(setting.center.x)}, {Math.round(setting.center.y)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className={`border px-2 py-1 text-xs font-bold transition ${
-                      isEditing
-                        ? 'border-emerald-300/50 bg-emerald-300 text-emerald-950 hover:bg-emerald-200'
-                        : 'border-white/15 text-stone-200 hover:bg-white/10'
-                    }`}
-                    onClick={() => {
-                      if (isEditing) {
-                        onApplyZone(floor);
-                        return;
-                      }
-
-                      onBeginZoneEdit(floor);
-                    }}
-                  >
-                    {isEditing ? '적용' : '변경'}
-                  </button>
-                </div>
-
-                <label className={`mt-3 block text-xs font-semibold ${isEditing ? 'text-stone-300' : 'text-stone-500'}`}>
-                  RSSI 임계값
-                  <span className="float-right text-stone-200">{setting.threshold} dBm</span>
-                  <input
-                    className="range-control mt-2 w-full disabled:cursor-not-allowed disabled:opacity-35"
-                    type="range"
-                    min="-90"
-                    max="-45"
-                    disabled={!isEditing}
-                    value={setting.threshold}
-                    onChange={(event) => {
-                      if (isEditing) {
-                        onZoneChange(floor, 'threshold', Number(event.target.value));
-                      }
-                    }}
-                  />
-                </label>
-
-                <label className={`mt-3 block text-xs font-semibold ${isEditing ? 'text-stone-300' : 'text-stone-500'}`}>
-                  위험 반경
-                  <span className="float-right text-stone-200">{setting.dangerRadius} m</span>
-                  <input
-                    className="range-control mt-2 w-full disabled:cursor-not-allowed disabled:opacity-35"
-                    type="range"
-                    min="3"
-                    max="18"
-                    disabled={!isEditing}
-                    value={setting.dangerRadius}
-                    onChange={(event) => {
-                      if (isEditing) {
-                        onZoneChange(floor, 'dangerRadius', Number(event.target.value));
-                      }
-                    }}
-                  />
-                </label>
-              </div>
-            );
-          })}
-        </div>
-
       </div>
     </section>
   );

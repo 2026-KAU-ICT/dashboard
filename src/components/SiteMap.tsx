@@ -172,8 +172,8 @@ export function SiteMap({
               </div>
             ))}
             <div
-              className={`absolute z-10 rounded-full border border-amber-200/75 bg-amber-300/10 touch-none ${
-                isZoneEditable ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-70'
+              className={`pointer-events-none absolute z-10 rounded-full border border-amber-200/75 bg-amber-300/10 ${
+                isZoneEditable ? 'opacity-100' : 'opacity-70'
               }`}
               style={{
                 left: `${(setting.center.x / activeZone.sourceWidth) * 100}%`,
@@ -181,13 +181,6 @@ export function SiteMap({
                 width: `${dangerWidth}%`,
                 height: `${dangerHeight}%`,
                 transform: 'translate(-50%, -50%)',
-              }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                if (isZoneEditable) {
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setDragFloor(activeFloor);
-                }
               }}
             >
               <span className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-amber-200/30 bg-black/55 px-2 py-1 text-[11px] font-black text-amber-100 sm:block">

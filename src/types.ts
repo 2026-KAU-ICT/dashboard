@@ -144,3 +144,26 @@ export type GatewayNode = {
   packets: number;
   anchor: Coordinate;
 };
+
+export type Esp32BeaconData = {
+  id: string;
+  dist: number;
+  rssi: number;
+};
+
+export type Esp32StatusData = {
+  has_fallen: boolean;
+  is_hooked: boolean;
+};
+
+export type Esp32GatewayData = {
+  gw_id: number;
+  status: Esp32StatusData;
+  beacons: Esp32BeaconData[];
+  ts?: number;
+};
+
+export type Esp32RuntimeData = Esp32GatewayData & {
+  receivedAt: string;
+  latencyMs: number;
+};

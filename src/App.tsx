@@ -1,6 +1,4 @@
 import {
-  BatteryWarning,
-  Cpu,
   Gauge,
   HardHat,
   ShieldAlert,
@@ -20,7 +18,10 @@ import {
 } from './components/EmergencyActionDialog';
 import { EmergencyOverlay } from './components/EmergencyOverlay';
 import { Header } from './components/Header';
-import { OperationalPanels } from './components/OperationalPanels';
+import {
+  OperationalPanels,
+  calculateDeviceRisk,
+} from './components/OperationalPanels';
 import { SiteMap } from './components/SiteMap';
 import { MetricCard } from './components/ui';
 import {
@@ -48,21 +49,68 @@ import type {
   LedMode,
   Worker,
   WorkerStatus,
+  Esp32GatewayData,
+  Esp32RuntimeData,
 } from './types';
 import { clamp, createTelemetry } from './lib/base';
 import {
-  calculateWorkerRisk,
   createEvent,
   isInSafetyHookZone,
   normalizeGatewayPayload,
   parseGatewayMessage,
 } from './lib/safety';
 
+function estimateWorkerCoordsFromBeacons(
+  floor: FloorId,
+  beacons: Esp32GatewayData['beacons'],
+): Coordinate | null {
+  if (!Array.isArray(beacons) || beacons.length === 0) {
+    return null;
+  }
+
+  let weightSum = 0;
+  let xSum = 0;
+  let ySum = 0;
+
+  beacons.forEach((beacon) => {
+    const anchor = beaconAnchors.find(
+      (item) =>
+        item.floor === floor &&
+        item.id.toLowerCase() === beacon.id.toLowerCase(),
+    );
+
+    if (!anchor || typeof beacon.dist !== 'number' || beacon.dist <= 0) {
+      return;
+    }
+
+    // 가까운 비콘일수록 더 큰 영향을 주기 위해 거리의 제곱 역수를 가중치로 사용
+    const weight = 1 / (beacon.dist * beacon.dist);
+
+    xSum += anchor.x * weight;
+    ySum += anchor.y * weight;
+    weightSum += weight;
+  });
+
+  if (weightSum === 0) {
+    return null;
+  }
+
+  return {
+    x: xSum / weightSum,
+    y: ySum / weightSum,
+  };
+}
+
 function App() {
   const queryClient = useQueryClient();
   const [selectedFloor, setSelectedFloor] = useState<FloorFilter>('1F');
-  const [selectedWorkerId, setSelectedWorkerId] = useState('A006');
+  const [selectedWorkerId, setSelectedWorkerId] = useState('ESP32-GW-1');
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [activeGatewayIds, setActiveGatewayIds] = useState<number[]>([]);
+  const [gatewayHookStatusMap, setGatewayHookStatusMap] = useState<Record<number, boolean>>({});
+  const [gatewayFallStatusMap, setGatewayFallStatusMap] = useState<Record<number, boolean>>({});
+  const [gatewayLatencyMap, setGatewayLatencyMap] = useState<Record<number, number>>({});
+  const [esp32DeviceMap, setEsp32DeviceMap] = useState<Record<number, Esp32RuntimeData>>({});
   const [zoneSettings, setZoneSettings] = useState(defaultZoneSettings);
   const [draftZoneSettings, setDraftZoneSettings] = useState(defaultZoneSettings);
   const [editingZoneFloors, setEditingZoneFloors] = useState<FloorId[]>([]);
@@ -72,6 +120,7 @@ function App() {
   const [acknowledgedEmergencyIds, setAcknowledgedEmergencyIds] = useState<string[]>([]);
   const [emergencyActionResult, setEmergencyActionResult] = useState<EmergencyActionResult | null>(null);
   const [controlActionResult, setControlActionResult] = useState<ControlActionResult | null>(null);
+
   const socketsRef = useRef<WebSocket[]>([]);
   const sirenRef = useRef<{
     context: AudioContext;
@@ -80,10 +129,10 @@ function App() {
     gain: GainNode;
   } | null>(null);
 
-  const { data: workers = initialWorkers } = useQuery({
+  const { data: workers = [] } = useQuery<Worker[]>({
     queryKey: QUERY_KEYS.workers,
-    queryFn: async () => initialWorkers,
-    initialData: initialWorkers,
+    queryFn: async () => [],
+    initialData: [],
   });
 
   const { data: events = initialEvents } = useQuery({
@@ -122,8 +171,10 @@ function App() {
         }
 
         const anchor =
-          beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase() && item.floor === payload.floor) ??
-          beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase());
+          beaconAnchors.find(
+            (item) => item.id.toLowerCase() === beacon.id.toLowerCase() && item.floor === payload.floor,
+          ) ?? beaconAnchors.find((item) => item.id.toLowerCase() === beacon.id.toLowerCase());
+
         return anchor
           ? {
               id: beacon.id,
@@ -166,16 +217,22 @@ function App() {
   const pushWorkerUpdate = useCallback(
     (payload: GatewayPayload, message?: string) => {
       syncBeaconZoneFromPayload(payload);
+
       const normalizedWorker = normalizeGatewayPayload(payload);
-      const calibratedGateway = payload.gateway_id ?? findNearestGatewayAnchor(payload.floor, payload.coords)?.id ?? normalizedWorker.gateway;
+      const calibratedGateway =
+        payload.gateway_id ?? findNearestGatewayAnchor(payload.floor, payload.coords)?.id ?? normalizedWorker.gateway;
+
       const nextWorker: Worker = {
         ...normalizedWorker,
         gateway_id: calibratedGateway,
         gateway: calibratedGateway,
       };
+
       let eventWorker = nextWorker;
-      queryClient.setQueryData<Worker[]>(QUERY_KEYS.workers, (current = initialWorkers) => {
+
+      queryClient.setQueryData<Worker[]>(QUERY_KEYS.workers, (current = []) => {
         const exists = current.some((worker) => worker.worker_id === nextWorker.worker_id);
+
         if (!exists) {
           return [...current, nextWorker];
         }
@@ -190,11 +247,13 @@ function App() {
             5,
             100,
           );
+
           const airbagCartridge =
             payload.telemetry?.airbagCartridge ??
             (nextWorker.status === 'EMERGENCY'
               ? nextWorker.telemetry.airbagCartridge
               : worker.telemetry.airbagCartridge);
+
           const merged: Worker = {
             ...worker,
             ...nextWorker,
@@ -211,6 +270,7 @@ function App() {
             batteryHistory: [...worker.batteryHistory, nextBattery].slice(-18),
             rssiHistory: [...worker.rssiHistory, nextWorker.telemetry.rssiDbm].slice(-18),
           };
+
           eventWorker = merged;
           return merged;
         });
@@ -222,6 +282,7 @@ function App() {
           : eventWorker.battery <= 25
             ? 'BATTERY'
             : eventWorker.status;
+
       const eventMessage =
         message ??
         (eventStatus === 'MAINTENANCE'
@@ -240,60 +301,86 @@ function App() {
     [findNearestGatewayAnchor, queryClient, syncBeaconZoneFromPayload],
   );
 
+  const pushWorkerUpdateRef = useRef(pushWorkerUpdate);
+
   useEffect(() => {
-    if (!gatewayUrls.length) {
-      setConnectionState('mock');
-      let tick = 0;
-      const timer = window.setInterval(() => {
-        tick += 1;
-        const base = initialWorkers[tick % initialWorkers.length];
-        const emergencyCycle = tick % 48 === 0;
-        const warningCycle = tick % 10 === 0 || !base.is_hooked;
-        const status: WorkerStatus = emergencyCycle ? 'EMERGENCY' : warningCycle ? 'WARNING' : 'NORMAL';
-        const nextHooked = status === 'NORMAL';
-        const driftX = Math.sin(tick * 0.8 + base.coords.x) * 14;
-        const driftY = Math.cos(tick * 0.64 + base.coords.y) * 10;
+    pushWorkerUpdateRef.current = pushWorkerUpdate;
+  }, [pushWorkerUpdate]);
 
-        const coords = {
-          x: clamp(base.coords.x + driftX + (tick % 3) * 5, 12, 190),
-          y: clamp(base.coords.y + driftY + (tick % 4) * 3, 12, 132),
-        };
-        const floorBeacons = beaconAnchors.filter((beacon) => beacon.floor === base.floor).slice(0, 4);
-        const beacons = floorBeacons.map((beacon) => {
-          const distance = Math.hypot(beacon.x - coords.x, beacon.y - coords.y);
-          const dist = Number((distance * 0.34).toFixed(1));
-          return {
-            id: beacon.id,
-            dist,
-            rssi: Math.round(clamp(-42 - distance * 0.28 + Math.sin(tick + beacon.x) * 2, -92, -35)),
-          };
-        });
-        const unhookedDanger = !nextHooked && isInSafetyHookZone({ ...base, coords, status, is_hooked: nextHooked }, zoneSettings);
-
-        pushWorkerUpdate({
-          worker_id: base.worker_id,
-          floor: base.floor,
-          status,
-          is_hooked: nextHooked,
-          coords,
-          timestamp: new Date().toISOString(),
-          beacons,
-          telemetry: createTelemetry(status, {
-            accelerationG: Number((0.8 + Math.abs(Math.sin(tick)) * (status === 'EMERGENCY' ? 4.2 : 1.4)).toFixed(1)),
-            fallConfidence: status === 'EMERGENCY' ? 96 : unhookedDanger ? 72 : status === 'WARNING' ? 55 : 12,
-            latencyMs: status === 'EMERGENCY' ? 142 : 118 + (tick % 6) * 9,
-            rssiDbm: -55 - (tick % 7) * 3 - (status === 'EMERGENCY' ? 8 : 0),
-          }),
-        }, unhookedDanger ? 'A-Hook 존 미체결 진입' : undefined);
-      }, 500);
-
-      return () => window.clearInterval(timer);
+  useEffect(() => {
+    if (gatewayUrls.length) {
+      return;
     }
 
-    setConnectionState('connecting');
-    const sockets = gatewayUrls.map((url) => new WebSocket(url));
-    socketsRef.current = sockets;
+    setConnectionState('mock');
+
+    let tick = 0;
+    const timer = window.setInterval(() => {
+      tick += 1;
+
+      const base = initialWorkers[tick % initialWorkers.length];
+      const emergencyCycle = tick % 48 === 0;
+      const warningCycle = tick % 10 === 0 || !base.is_hooked;
+      const status: WorkerStatus = emergencyCycle ? 'EMERGENCY' : warningCycle ? 'WARNING' : 'NORMAL';
+      const nextHooked = status === 'NORMAL';
+      const driftX = Math.sin(tick * 0.8 + base.coords.x) * 14;
+      const driftY = Math.cos(tick * 0.64 + base.coords.y) * 10;
+
+      const coords = {
+        x: clamp(base.coords.x + driftX + (tick % 3) * 5, 12, 190),
+        y: clamp(base.coords.y + driftY + (tick % 4) * 3, 12, 132),
+      };
+
+      const floorBeacons = beaconAnchors.filter((beacon) => beacon.floor === base.floor).slice(0, 4);
+      const beacons = floorBeacons.map((beacon) => {
+        const distance = Math.hypot(beacon.x - coords.x, beacon.y - coords.y);
+        const dist = Number((distance * 0.34).toFixed(1));
+
+        return {
+          id: beacon.id,
+          dist,
+          rssi: Math.round(clamp(-42 - distance * 0.28 + Math.sin(tick + beacon.x) * 2, -92, -35)),
+        };
+      });
+
+      const unhookedDanger = !nextHooked && isInSafetyHookZone({ ...base, coords, status, is_hooked: nextHooked }, zoneSettings);
+
+      pushWorkerUpdate({
+        worker_id: base.worker_id,
+        floor: base.floor,
+        status,
+        is_hooked: nextHooked,
+        coords,
+        timestamp: new Date().toISOString(),
+        beacons,
+        telemetry: createTelemetry(status, {
+          accelerationG: Number((0.8 + Math.abs(Math.sin(tick)) * (status === 'EMERGENCY' ? 4.2 : 1.4)).toFixed(1)),
+          fallConfidence: status === 'EMERGENCY' ? 96 : unhookedDanger ? 72 : status === 'WARNING' ? 55 : 12,
+          latencyMs: status === 'EMERGENCY' ? 142 : 118 + (tick % 6) * 9,
+          rssiDbm: -55 - (tick % 7) * 3 - (status === 'EMERGENCY' ? 8 : 0),
+        }),
+      }, unhookedDanger ? 'A-Hook 존 미체결 진입' : undefined);
+    }, 500);
+
+    return () => window.clearInterval(timer);
+  }, [pushWorkerUpdate, zoneSettings]);
+
+  useEffect(() => {
+    if (!gatewayUrls.length) {
+      return;
+    }
+
     let disposed = false;
+
+    console.log('연결 시도 URL 목록:', gatewayUrls);
+    setConnectionState('connecting');
+
+    const sockets = gatewayUrls.map((url) => {
+      console.log('WebSocket 연결 시도:', url);
+      return new WebSocket(url);
+    });
+
+    socketsRef.current = sockets;
 
     const syncConnectionState = () => {
       if (disposed) {
@@ -311,23 +398,166 @@ function App() {
     };
 
     sockets.forEach((socket) => {
-      socket.addEventListener('open', syncConnectionState);
-      socket.addEventListener('close', syncConnectionState);
-      socket.addEventListener('error', syncConnectionState);
+      socket.addEventListener('open', () => {
+        console.log('WebSocket 연결 성공:', socket.url);
+        syncConnectionState();
+      });
+
+      socket.addEventListener('close', () => {
+        console.log('WebSocket 연결 종료:', socket.url);
+        syncConnectionState();
+      });
+
+      socket.addEventListener('error', (error) => {
+        console.error('WebSocket 에러:', socket.url, error);
+        syncConnectionState();
+      });
+
       socket.addEventListener('message', (event) => {
         if (disposed) {
           return;
         }
 
+        console.log('ESP32 원본 데이터:', event.data);
+
         try {
-          const payloads = parseGatewayMessage(JSON.parse(event.data));
-          if (!payloads.length) {
-            setCommandFeedback('수신 데이터 필드 확인 필요');
-            return;
+          const parsedData = JSON.parse(event.data);
+          console.log('JSON 변환된 데이터:', parsedData);
+
+        const esp32Data = parsedData as Partial<Esp32GatewayData>;
+
+        const receivedAtMs = Date.now();
+
+        const rawLatencyMs =
+          typeof esp32Data.ts === 'number'
+            ? receivedAtMs - esp32Data.ts * 1000
+            : 0;
+
+        const safeLatencyMs = rawLatencyMs >= 0 ? rawLatencyMs : 0;
+
+        if (typeof esp32Data.gw_id === 'number') {
+          const gwId = esp32Data.gw_id;
+
+          setActiveGatewayIds((current) =>
+            current.includes(gwId)
+              ? current
+              : [...current, gwId],
+          );
+
+          if (typeof esp32Data.status?.is_hooked === 'boolean') {
+            setGatewayHookStatusMap((current) => ({
+              ...current,
+              [gwId]: esp32Data.status!.is_hooked,
+            }));
           }
 
-          payloads.forEach((payload) => pushWorkerUpdate(payload));
-        } catch {
+          if (typeof esp32Data.status?.has_fallen === 'boolean') {
+            setGatewayFallStatusMap((current) => ({
+              ...current,
+              [gwId]: esp32Data.status!.has_fallen,
+            }));
+          }
+
+          setGatewayLatencyMap((current) => ({
+            ...current,
+            [gwId]: safeLatencyMs,
+          }));
+
+          if (
+            typeof esp32Data.status?.is_hooked === 'boolean' &&
+            typeof esp32Data.status?.has_fallen === 'boolean'
+          ) {
+            setEsp32DeviceMap((current) => ({
+              ...current,
+              [gwId]: {
+                gw_id: gwId,
+                status: {
+                  is_hooked: esp32Data.status!.is_hooked,
+                  has_fallen: esp32Data.status!.has_fallen,
+                },
+                beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
+                ts: esp32Data.ts,
+                receivedAt: new Date(receivedAtMs).toISOString(),
+                latencyMs: safeLatencyMs,
+              },
+            }));
+          }
+        }
+
+        const payloads = parseGatewayMessage(parsedData);
+        console.log('대시보드용으로 변환된 데이터:', payloads);
+
+        if (!payloads.length) {
+          console.warn('parseGatewayMessage 결과가 비어 있음');
+          setCommandFeedback('수신 데이터 필드 확인 필요');
+          return;
+        }
+
+        const mappedPayloads = payloads.map((payload) => {
+          const floor: FloorId =
+            typeof esp32Data.gw_id === 'number'
+              ? esp32Data.gw_id === 1
+                ? '1F'
+                : esp32Data.gw_id === 2
+                  ? '2F'
+                  : esp32Data.gw_id === 3
+                    ? '3F'
+                    : '4F'
+              : payload.floor;
+
+          const estimatedCoords = estimateWorkerCoordsFromBeacons(
+            floor,
+            Array.isArray(esp32Data.beacons) ? esp32Data.beacons : [],
+          );
+
+          const averageRssi =
+            Array.isArray(esp32Data.beacons) && esp32Data.beacons.length > 0
+              ? Math.round(
+                  esp32Data.beacons.reduce((sum, beacon) => sum + beacon.rssi, 0) /
+                    esp32Data.beacons.length,
+                )
+              : payload.telemetry?.rssiDbm ?? 0;
+
+          const status: WorkerStatus =
+            esp32Data.status?.has_fallen === true
+              ? 'EMERGENCY'
+              : esp32Data.status?.is_hooked === false
+                ? 'WARNING'
+                : 'NORMAL';
+
+          return {
+            ...payload,
+
+            worker_id: `ESP32-GW-${esp32Data.gw_id ?? 'UNKNOWN'}`,
+
+            floor,
+            gateway_id: typeof esp32Data.gw_id === 'number' ? esp32Data.gw_id : payload.gateway_id,
+
+            status,
+            is_hooked:
+              typeof esp32Data.status?.is_hooked === 'boolean'
+                ? esp32Data.status.is_hooked
+                : payload.is_hooked,
+
+            coords: estimatedCoords ?? payload.coords,
+            beacons: Array.isArray(esp32Data.beacons) ? esp32Data.beacons : payload.beacons,
+
+            timestamp: new Date(receivedAtMs).toISOString(),
+
+            telemetry: {
+              ...payload.telemetry,
+              rssiDbm: averageRssi,
+              latencyMs: safeLatencyMs,
+              fallConfidence: esp32Data.status?.has_fallen ? 100 : 0,
+            },
+          };
+        });
+
+        mappedPayloads.forEach((payload) => {
+          pushWorkerUpdateRef.current(payload as GatewayPayload);
+        });
+        } catch (error) {
+          console.error('수신 데이터 처리 중 오류:', error);
           setCommandFeedback('수신 데이터 형식 오류');
         }
       });
@@ -338,16 +568,17 @@ function App() {
       sockets.forEach((socket) => socket.close());
       socketsRef.current = [];
     };
-  }, [pushWorkerUpdate, zoneSettings]);
+  }, []);
 
   const selectedWorker = useMemo(
-    () => workers.find((worker) => worker.worker_id === selectedWorkerId) ?? workers[0],
+    () => workers.find((worker) => worker.worker_id === selectedWorkerId),
     [selectedWorkerId, workers],
   );
 
   const changeFloor = useCallback(
     (floor: FloorFilter) => {
       setSelectedFloor(floor);
+
       if (floor === 'ALL') {
         return;
       }
@@ -362,9 +593,11 @@ function App() {
 
   const visibleZoneSettings = useMemo(() => {
     const next = { ...zoneSettings };
+
     editingZoneFloors.forEach((floor) => {
       next[floor] = draftZoneSettings[floor];
     });
+
     return next;
   }, [draftZoneSettings, editingZoneFloors, zoneSettings]);
 
@@ -382,7 +615,9 @@ function App() {
     const audioWindow = window as Window & {
       webkitAudioContext?: typeof AudioContext;
     };
+
     const AudioCtor = window.AudioContext ?? audioWindow.webkitAudioContext;
+
     if (!AudioCtor) {
       return;
     }
@@ -406,6 +641,7 @@ function App() {
       gain.connect(context.destination);
       oscillator.start();
       lfo.start();
+
       sirenRef.current = { context, oscillator, lfo, gain };
     } catch {
       setCommandFeedback('브라우저 사운드 권한 대기');
@@ -414,16 +650,19 @@ function App() {
 
   const stopSirenSound = useCallback(() => {
     const siren = sirenRef.current;
+
     if (!siren) {
       return;
     }
 
     siren.gain.gain.setTargetAtTime(0.0001, siren.context.currentTime, 0.03);
+
     window.setTimeout(() => {
       siren.oscillator.stop();
       siren.lfo.stop();
       siren.context.close();
     }, 120);
+
     sirenRef.current = null;
   }, []);
 
@@ -454,18 +693,47 @@ function App() {
 
   useEffect(() => stopSirenSound, [stopSirenSound]);
 
-  const metrics = useMemo(() => {
-    const total = workers.length;
-    const unhooked = workers.filter((worker) => !worker.is_hooked).length;
-    const emergency = workers.filter((worker) => worker.status === 'EMERGENCY').length;
-    const lowBattery = workers.filter((worker) => worker.battery <= 25).length;
-    const cartridgeReplace = workers.filter((worker) => worker.telemetry.airbagCartridge !== 'CHARGED').length;
-    const latency = Math.round(
-      workers.reduce((sum, worker) => sum + worker.telemetry.latencyMs, 0) / Math.max(total, 1),
+  const esp32Devices = useMemo(
+    () => Object.values(esp32DeviceMap).sort((a, b) => a.gw_id - b.gw_id),
+    [esp32DeviceMap],
+  );
+
+  const riskAnalysisRisk = useMemo(() => {
+    if (!selectedWorker) {
+      return undefined;
+    }
+
+    const selectedGatewayId =
+      typeof selectedWorker.gateway_id === 'number'
+        ? selectedWorker.gateway_id
+        : Number(selectedWorker.worker_id.replace('ESP32-GW-', ''));
+
+    const selectedDevice = esp32Devices.find(
+      (device) => device.gw_id === selectedGatewayId,
     );
 
-    return { total, unhooked, emergency, lowBattery, cartridgeReplace, latency };
-  }, [workers]);
+    if (!selectedDevice) {
+      return undefined;
+    }
+
+    return calculateDeviceRisk(selectedDevice).score;
+  }, [selectedWorker, esp32Devices]);
+
+  const metrics = useMemo(() => {
+    const total = activeGatewayIds.length;
+    const unhooked = activeGatewayIds.filter((gwId) => gatewayHookStatusMap[gwId] === false).length;
+    const emergency = activeGatewayIds.filter((gwId) => gatewayFallStatusMap[gwId] === true).length;
+
+    const latencyValues = activeGatewayIds
+      .map((gwId) => gatewayLatencyMap[gwId])
+      .filter((latency): latency is number => typeof latency === 'number');
+
+    const latency = latencyValues.length
+      ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
+      : 0;
+
+    return { total, unhooked, emergency, latency };
+  }, [activeGatewayIds, gatewayHookStatusMap, gatewayFallStatusMap, gatewayLatencyMap]);
 
   const createGatewayCommandPayload = (command: DownlinkCommand) => {
     switch (command.command) {
@@ -476,8 +744,10 @@ function App() {
           target_worker_id: command.target_id,
           target_id: command.target_id,
         };
+
       case 'SET_LED_MODE': {
         const hardwareCommand = command.mode === 'OFF' ? 'LED_OFF' : command.mode === 'STEADY' ? 'LED_ON' : 'LED_BLINK';
+
         return {
           type: 'CONTROL',
           command: hardwareCommand,
@@ -486,6 +756,7 @@ function App() {
           mode: command.mode,
         };
       }
+
       case 'BROADCAST_EVACUATION':
         return {
           type: 'CONTROL',
@@ -494,6 +765,7 @@ function App() {
           floor: command.floor,
           reason: command.reason,
         };
+
       case 'RESET_AIRBAG_CARTRIDGE':
         return {
           type: 'CONTROL',
@@ -501,6 +773,7 @@ function App() {
           target_worker_id: command.target_id,
           target_id: command.target_id,
         };
+
       case 'UPDATE_ZONE':
         return {
           type: 'CONFIG',
@@ -510,6 +783,7 @@ function App() {
           danger_radius_m: command.danger_radius_m,
           zone_center: command.zone_center,
         };
+
       case 'UPDATE_GATEWAY_ZONE':
         return {
           type: 'CONFIG',
@@ -524,6 +798,7 @@ function App() {
     (command: DownlinkCommand) => {
       const commandText = JSON.stringify(createGatewayCommandPayload(command));
       const openSockets = socketsRef.current.filter((socket) => socket.readyState === WebSocket.OPEN);
+
       if (connectionState === 'live' && openSockets.length > 0) {
         openSockets.forEach((socket) => socket.send(commandText));
         setCommandFeedback(`게이트웨이 ${openSockets.length}곳 전송 완료`);
@@ -535,21 +810,28 @@ function App() {
         'target_id' in command
           ? workers.find((worker) => worker.worker_id === command.target_id)
           : undefined;
+
       const floor = 'floor' in command ? command.floor : target?.floor ?? '4F';
       const eventFloor: FloorId = floor === 'ALL' ? '4F' : floor;
       const workerName = target?.name ?? (command.command === 'BROADCAST_EVACUATION' ? '전체 작업자' : '구역 설정');
+
       const message = (() => {
         switch (command.command) {
           case 'ACTIVATE_ALARM':
             return `${workerName} 조끼 부저/LED 작동`;
+
           case 'SET_LED_MODE':
             return `${workerName} LED ${ledLabels[command.mode]} 제어`;
+
           case 'BROADCAST_EVACUATION':
             return `${floor === 'ALL' ? '전체 현장' : floorLabels[floor]} 주변 작업자 동시 경고`;
+
           case 'RESET_AIRBAG_CARTRIDGE':
             return `${workerName} 에어백 카트리지 교체 완료`;
+
           case 'UPDATE_ZONE':
             return `${floorLabels[command.floor]} A-Hook 존 갱신`;
+
           case 'UPDATE_GATEWAY_ZONE':
             return `${floorLabels[command.floor]} 비콘 기준점 갱신`;
         }
@@ -563,7 +845,13 @@ function App() {
             }
 
             if (command.command === 'SET_LED_MODE') {
-              return { ...worker, telemetry: { ...worker.telemetry, ledMode: command.mode } };
+              return {
+                ...worker,
+                telemetry: {
+                  ...worker.telemetry,
+                  ledMode: command.mode,
+                },
+              };
             }
 
             return {
@@ -603,10 +891,12 @@ function App() {
     }
 
     const worker = selectedWorker;
+
     sendCommand({
       command: 'ACTIVATE_ALARM',
       target_id: worker.worker_id,
     });
+
     setControlActionResult({
       action: 'VEST_ALARM',
       floor: worker.floor,
@@ -633,16 +923,20 @@ function App() {
       ...current,
       [floor]: zoneSettings[floor],
     }));
+
     setEditingZoneFloors((current) => (current.includes(floor) ? current : [...current, floor]));
   };
 
   const applyZoneSetting = (floor: FloorId) => {
     const setting = draftZoneSettings[floor];
+
     setZoneSettings((current) => ({
       ...current,
       [floor]: setting,
     }));
+
     setEditingZoneFloors((current) => current.filter((editingFloor) => editingFloor !== floor));
+
     sendCommand({
       command: 'UPDATE_ZONE',
       floor,
@@ -680,10 +974,12 @@ function App() {
     }
 
     const worker = selectedWorker;
+
     sendCommand({
       command: 'RESET_AIRBAG_CARTRIDGE',
       target_id: worker.worker_id,
     });
+
     setControlActionResult({
       action: 'CARTRIDGE_RESET',
       floor: worker.floor,
@@ -701,6 +997,7 @@ function App() {
       floor,
       reason: 'FALL_OR_UNHOOKED_DANGER',
     });
+
     setControlActionResult({
       action: floor === 'ALL' ? 'SITE_EVACUATION' : 'FLOOR_WARNING',
       floor,
@@ -719,7 +1016,9 @@ function App() {
 
     const worker = activeEmergency;
     const handledAt = new Date().toISOString();
+
     stopSirenSound();
+
     setAcknowledgedEmergencyIds((current) =>
       current.includes(worker.worker_id) ? current : [...current, worker.worker_id],
     );
@@ -741,6 +1040,7 @@ function App() {
 
     if (action === 'ACK_STOP') {
       setCommandFeedback('비상 알림 확인 및 관제 사이렌 정지');
+
       const acknowledgementEvent: EventLog = {
         id: `ack-${Date.now()}`,
         timestamp: handledAt,
@@ -750,6 +1050,7 @@ function App() {
         status: 'CONTROL',
         message: `${worker.name} 추락 알림 확인 및 관제 사이렌 정지`,
       };
+
       queryClient.setQueryData<EventLog[]>(QUERY_KEYS.events, (current = initialEvents) => [
         acknowledgementEvent,
         ...current,
@@ -757,6 +1058,7 @@ function App() {
     }
 
     setActiveEmergency(null);
+
     setEmergencyActionResult({
       action,
       workerId: worker.worker_id,
@@ -772,7 +1074,7 @@ function App() {
       <div className="mx-auto flex w-full max-w-[1840px] flex-col gap-4">
         <Header connectionState={connectionState} commandFeedback={commandFeedback} />
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             icon={<HardHat className="h-6 w-6" />}
             label="총 작업자"
@@ -798,22 +1100,8 @@ function App() {
             icon={<Gauge className="h-6 w-6" />}
             label="평균 지연"
             value={metrics.latency}
-            helper="ms WebSocket"
+            helper="ms 수신 지연"
             tone="cyan"
-          />
-          <MetricCard
-            icon={<BatteryWarning className="h-6 w-6" />}
-            label="배터리 부족"
-            value={metrics.lowBattery}
-            helper="교체/충전 대상"
-            tone="amber"
-          />
-          <MetricCard
-            icon={<Cpu className="h-6 w-6" />}
-            label="카트리지 교체"
-            value={metrics.cartridgeReplace}
-            helper="리필 키트 대상"
-            tone="red"
           />
         </section>
 
@@ -832,20 +1120,21 @@ function App() {
           <aside className="grid gap-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
             <ControlPanel
               selectedWorker={selectedWorker}
-              zoneSettings={visibleZoneSettings}
-              editingZoneFloors={editingZoneFloors}
+              risk={riskAnalysisRisk}
               onActivateAlarm={activateSelectedAlarm}
-              onBroadcastEvacuation={broadcastEvacuation}
-              onLedModeChange={setSelectedLedMode}
-              onResetCartridge={resetSelectedCartridge}
-              onBeginZoneEdit={beginZoneEdit}
-              onApplyZone={applyZoneSetting}
-              onZoneChange={updateZoneSetting}
+              onBroadcastFloor={() => {
+                if (!selectedWorker) {
+                  return;
+                }
+
+                broadcastEvacuation(selectedWorker.floor);
+              }}
+              onBroadcastSite={() => broadcastEvacuation('ALL')}
             />
           </aside>
 
           <div className="min-w-0 lg:col-start-1 lg:row-start-2">
-            <OperationalPanels workers={workers} events={events} zoneSettings={zoneSettings} />
+            <OperationalPanels esp32Devices={esp32Devices} />
           </div>
         </div>
       </div>
@@ -858,9 +1147,11 @@ function App() {
           onAcknowledge={() => handleEmergencyAction('ACK_STOP')}
         />
       )}
+
       {emergencyActionResult && (
         <EmergencyActionDialog result={emergencyActionResult} onClose={() => setEmergencyActionResult(null)} />
       )}
+
       {controlActionResult && (
         <ControlActionDialog result={controlActionResult} onClose={() => setControlActionResult(null)} />
       )}
