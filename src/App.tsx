@@ -775,8 +775,30 @@ function App() {
       return undefined;
     }
 
-    return calculateDeviceRisk(selectedDevice).score;
-  }, [selectedWorker, esp32Devices]);
+    const hasFallen = selectedDevice.status.has_fallen;
+    const isUnhooked = !selectedDevice.status.is_hooked;
+
+    // 외곽 판단: 지도 좌표가 가장자리 쪽에 있으면 위험 점수 부여
+    // 현재 좌표 범위가 대략 x: 0~200, y: 0~140 기준이라면 아래처럼 판단
+    const isOuterArea =
+      selectedWorker.coords.x <= 20 ||
+      selectedWorker.coords.x >= 180 ||
+      selectedWorker.coords.y <= 15 ||
+      selectedWorker.coords.y >= 125;
+
+    // 훅존 안에 있는지 판단
+    const isInsideHookZone = isInSafetyHookZone(
+      selectedWorker,
+      zoneSettings,
+    );
+
+    const fallScore = hasFallen ? 60 : 0;
+    const hookScore = isUnhooked ? 15 : 0;
+    const outerScore = isOuterArea ? 15 : 0;
+    const hookZoneScore = !isInsideHookZone ? 10 : 0;
+
+    return fallScore + hookScore + outerScore + hookZoneScore;
+  }, [selectedWorker, esp32Devices, zoneSettings]);
 
   const metrics = useMemo(() => {
     const total = activeGatewayIds.length;
